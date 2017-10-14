@@ -1083,7 +1083,7 @@ websocket_send_all (xml_t data)
    return NULL;
 }
 
-#ifndef	LIB
+#ifdef	MAIN
 int
 main (int argc, const char *argv[])
 {
