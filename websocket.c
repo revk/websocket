@@ -56,6 +56,7 @@ int websocket_debug = 0;
 
 typedef struct websocket_bind_s websocket_bind_t;
 typedef struct websocket_path_s websocket_path_t;
+typedef websocket_t *websocket_p;
 
 typedef struct txb_s txb_t;
 struct txb_s
@@ -69,9 +70,10 @@ struct txb_s
 };
 
 typedef struct txq_s txq_t;
+typedef txq_t *txq_p;
 struct txq_s
 {                               // Queue of transmit data
-   volatile txq_t *next;
+   volatile txq_p next;
    txb_t *data;
 };
 
@@ -85,7 +87,7 @@ struct websocket_bind_s
    int socket;                  // listening socket
    websocket_path_t *paths;
    pthread_mutex_t mutex;       // Protect sessions
-   volatile websocket_t *sessions;
+   volatile websocket_p sessions;
 };
 
 struct websocket_path_s
@@ -99,7 +101,7 @@ struct websocket_path_s
 
 struct websocket_s
 {                               // The specific web socket instance
-   volatile websocket_t *next;
+   volatile websocket_p next;
    websocket_bind_t *bind;
    websocket_path_t *path;
    char *from;
@@ -110,8 +112,8 @@ struct websocket_s
    size_t txptr;                // Pending sent data from head of queue
    void *data;                  // App data link
    pthread_mutex_t mutex;       // Protect volatile
-   volatile txq_t *txq,
-    *txe;
+   volatile txq_p txq,
+     txe;
    volatile int socket;         // rx socket
    volatile int pipe[2];        // pipe used to kick tx
    volatile unsigned char connected:1;
@@ -244,7 +246,7 @@ websocket_tx (void *p)
                len = send (w->socket, w->txq->data->head, w->txq->data->hlen, 0);
             if (websocket_debug)
             {
-               fprintf (stderr, "Header");
+               fprintf (stderr, "Tx Header");
                int p;
                for (p = 0; p < w->txq->data->hlen; p++)
                   fprintf (stderr, " %02X", w->txq->data->head[p]);
@@ -290,16 +292,22 @@ websocket_tx (void *p)
          send (w->socket, end, 2, 0);
    }
    if (w->ss)
-   {
       SSL_shutdown (w->ss);
+   close (w->socket);
+   {
+      // This is to make sure the pipe is closed and not just outgoing broken
+      char poke;
+      while (read (w->pipe[0], &poke, sizeof (poke)) > 0);
+   }
+   pthread_mutex_lock (&w->mutex);
+   if (w->ss)
+   {
       SSL_free (w->ss);
       w->ss = NULL;
    }
-   pthread_mutex_lock (&w->mutex);
+   w->socket = -1;
    close (w->pipe[0]);
    w->pipe[0] = -1;
-   close (w->socket);
-   w->socket = -1;
    pthread_mutex_unlock (&w->mutex);
    if (w->path && w->path->callback && w->connected)
    {
@@ -563,6 +571,8 @@ websocket_do_rx (websocket_t * w)
                   w->rxptr += len;
                }
                w->rxdata[w->rxptr] = 0;
+               if (websocket_debug)
+                  fprintf (stderr, "Parse [%s]\n", (char *) w->rxdata);
                xml_t data = xml_tree_parse_json ((char *) w->rxdata, "json");
                if (w->path && w->path->callback)
                {                // Note can call a post with null if nothing posted
@@ -693,7 +703,7 @@ websocket_do_rx (websocket_t * w)
          }
          if (websocket_debug)
          {
-            fprintf (stderr, "Header");
+            fprintf (stderr, "Rx Header");
             for (hptr = 0; hptr < hlen; hptr++)
                fprintf (stderr, " %02X", head[hptr]);
             fprintf (stderr, "\n");
@@ -737,6 +747,8 @@ websocket_do_rx (websocket_t * w)
             w->rxdata[w->rxlen] = 0;
             if ((head[0] & 0xF) == 1 || (head[0] & 0xF) == 2)
             {                   // data
+               if (websocket_debug)
+                  fprintf (stderr, "Parse [%s]\n", (char *) w->rxdata);
                xml_t xml = xml_tree_parse_json ((char *) w->rxdata, "json");
                if (!xml)
                   return "Bad JSON";
@@ -902,7 +914,7 @@ websocket_listen (void *p)
          inet_ntop (addr.sin6_family, &((struct sockaddr_in *) &addr)->sin_addr, from, sizeof (from));
       else
          inet_ntop (addr.sin6_family, &addr.sin6_addr, from, sizeof (from));
-      if (!strncmp (from, "::ffff:", 7))
+      if (!strncmp (from, "::ffff:", 7) && strchr (from, '.'))
          memmove (from, from + 7, strlen (from + 7) + 1);
       if (websocket_debug)
          fprintf (stderr, "Accepted connection from %s\n", from);
