@@ -97,6 +97,7 @@ struct websocket_path_s
    const char *path;            // Check path (null=wildcard)
    const char *origin;          // Check origin (null=wildcard)
    websocket_callback_t *callback;
+   websocket_callback_raw_t *callbackraw;
 };
 
 struct websocket_s
@@ -111,6 +112,7 @@ struct websocket_s
    size_t rxlen;                // Length of buffer allocated
    size_t txptr;                // Pending sent data from head of queue
    void *data;                  // App data link
+   long ping;                   // Ping time (us)
    pthread_mutex_t mutex;       // Protect volatile
    volatile txq_p txq,
      txe;
@@ -119,6 +121,12 @@ struct websocket_s
    volatile unsigned char connected:1;
    volatile unsigned char closed:1;
 };
+
+unsigned long
+websocket_ping (websocket_t * w)
+{                               // Ping data
+   return w->ping;
+}
 
 void *
 websocket_data (websocket_t * w)
@@ -147,14 +155,8 @@ txb_done (txb_t * b)
 }
 
 static txb_t *
-txb_new (xml_t d)
-{                               // Make a block from XML (count set to 1)
-   char *buf = NULL;
-   size_t len = 0;
-   FILE *out = open_memstream (&buf, &len);
-   if (d)
-      xml_write_json (out, d);
-   fclose (out);
+txb_new_data (size_t len, const unsigned char *buf)
+{                               // Make a block from XML (count set to 1) - assuming buf malloc'd
    txb_t *txb = malloc (sizeof (*txb));
    memset (txb, 0, sizeof (*txb));
    pthread_mutex_init (&txb->mutex, NULL);
@@ -162,7 +164,7 @@ txb_new (xml_t d)
    txb->buf = (unsigned char *) buf;
    txb->count = 1;              // Initial count to one so not zapped whilst adding to queues
    int p = 0;
-   if (!d)
+   if (!buf)
    {                            // close
       txb->head[0] = 0x88;      // close
       txb->head[1] = 0;         // zero len
@@ -191,6 +193,20 @@ txb_new (xml_t d)
       txb->hlen = p;
    }
    return txb;
+}
+
+static txb_t *
+txb_new (xml_t d)
+{                               // Make a block from XML (count set to 1)
+   if (!d)
+      return txb_new_data (0, NULL);
+   char *buf = NULL;
+   size_t len = 0;
+   FILE *out = open_memstream (&buf, &len);
+   if (d)
+      xml_write_json (out, d);
+   fclose (out);
+   return txb_new_data (len, (unsigned char *) buf);
 }
 
 static void
@@ -230,8 +246,10 @@ websocket_tx (void *p)
       txb_done (q->data);
       free (q);                 // queue freed
    }
+   time_t nextping = time (0) + 2;
    while (1)
    {
+      time_t now = time (0);
       // Send data if we can
       if (w->txq && w->connected)
       {
@@ -271,7 +289,40 @@ websocket_tx (void *p)
             break;
          if (w->txq)
             continue;           // More data
+      } else if (now > nextping)
+      {                         // Send Ping
+         nextping = now + 60;
+         struct timeval tv;
+         struct timezone tz;
+         gettimeofday (&tv, &tz);
+         unsigned long long us = tv.tv_sec * 1000000ULL + tv.tv_usec;;
+         unsigned char ping[2 + sizeof (us)] = { 0x89, sizeof (us) };
+         memcpy (ping + 2, &us, sizeof (us));
+         int p = 0,
+            l = sizeof (ping),
+            len;
+         if (websocket_debug)
+         {
+            fprintf (stderr, "Tx ");
+            for (len = 0; len < l; len++)
+               fprintf (stderr, " %02X", ping[len]);
+            fprintf (stderr, "\n");
+         }
+         while (p < l)
+         {
+            if (w->ss)
+               len = SSL_write (w->ss, ping + p, l - p);
+            else
+               len = send (w->socket, ping + p, l - p, 0);
+            if (len <= 0)
+               break;
+            p += len;
+         }
       }
+      struct pollfd p = { w->pipe[0], POLLIN, 0 };
+      int s = poll (&p, 1, (now < nextping) ? (nextping - now) * 1000 : 1000);
+      if (!s)
+         continue;
       // Wait for new data to be added to queue
       char poke;
       ssize_t len = read (w->pipe[0], &poke, sizeof (poke));
@@ -309,7 +360,12 @@ websocket_tx (void *p)
    close (w->pipe[0]);
    w->pipe[0] = -1;
    pthread_mutex_unlock (&w->mutex);
-   if (w->path && w->path->callback && w->connected)
+   if (w->path && w->path->callbackraw && w->connected)
+   {
+      if (websocket_debug)
+         fprintf (stderr, "%p Close callback\n", w);
+      w->path->callbackraw (w, NULL, 0, NULL);  // Closed (we do not consider returned error)
+   } else if (w->path && w->path->callback && w->connected)
    {
       if (websocket_debug)
          fprintf (stderr, "%p Close callback\n", w);
@@ -377,7 +433,7 @@ websocket_do_rx (websocket_t * w)
       // Process headers
       unsigned char *e = w->rxdata + ep + 2;
       ep += 4;
-      // The command (GET/POST)
+      // The command (GET/POST/etc)
       unsigned char *p;
       for (p = w->rxdata; p < e && isalpha (*p); p++)
          *p = tolower (*p);
@@ -403,7 +459,8 @@ websocket_do_rx (websocket_t * w)
       if (*query == '?')
       {                         // decode query args and add to header too
          *query++ = 0;
-         xml_attribute_set (head, "?", query);  // Provide the raw query string
+         xml_t q = head;
+         q = xml_add (head, "query", query);    // New format creates query as sub object of head
          while (*query)
          {                      // URL decode
             char *p = query,
@@ -433,15 +490,15 @@ websocket_do_rx (websocket_t * w)
             }
             if (*p == '&')
                *p++ = 0;
-            xml_attribute_t a = xml_attribute_set (head, query, v ? : "null");
+            xml_attribute_t a = xml_attribute_set (q, query, v ? : "null");
             if (a && !v)
                a->json_unquoted = 1;
             query = p;
          }
       }
-      xml_attribute_set (head, "origin", NULL); // Not settable by user in query string
-      xml_attribute_set (head, "authorization", NULL);  // Not settable by user in query string
-      xml_element_set_content (head, (char *) p);       // The URL
+      xml_t http = head;
+      http = xml_element_add (head, "http");    // Sub object if using raw logic
+      xml_element_set_content (http, (char *) p);       // The URL
       p = eol;                  // First header (these overwrite any user sent attributes)
       // Extract headers
       while (p < e)
@@ -482,17 +539,17 @@ websocket_do_rx (websocket_t * w)
             {
                data = realloc (data, l + 1);
                data[l] = 0;
-               xml_attribute_set (head, (char *) p, data);
+               xml_attribute_set (http, (char *) p, data);
                free (data);
             }
          } else
-            xml_attribute_set (head, (char *) p, (char *) eoh);
+            xml_attribute_set (http, (char *) p, (char *) eoh);
          p = eol;
          if (p == e || *p < ' ')
             break;              // Odd
       }
-      char *host = xml_get (head, "@host");
-      char *origin = xml_get (head, "@origin");
+      char *host = xml_get (http, "@host");
+      char *origin = xml_get (http, "@origin");
       xml_attribute_set (head, "IP", w->from);
       int mismatch (const char *ref, const char *val)
       {
@@ -514,14 +571,16 @@ websocket_do_rx (websocket_t * w)
       }
       w->path = path;
       char *er = NULL;
-      char *v = xml_get (head, "@upgrade");
+      char *v = xml_get (http, "@upgrade");
       if (!v)
       {                         // HTTP
-         if (!strcmp (xml_element_name (head), "post"))
+         char *cl = xml_get (http, "@content-length");
+         char *expect = xml_get (http, "@expect");
+         if (!strcmp (xml_element_name (head), "post") || expect || cl)
          {                      // data to receive
             if (ep < w->rxptr)
             {
-               memcpy (w->rxdata, w->rxdata + ep, w->rxptr - ep);
+               memmove (w->rxdata, w->rxdata + ep, w->rxptr - ep);
                w->rxptr -= ep;
             } else
             {
@@ -531,15 +590,13 @@ websocket_do_rx (websocket_t * w)
                w->rxlen = 0;
             }
             size_t max = 0;
-            char *v = xml_get (head, "@content-length");
-            if (v)
+            if (cl)
             {
-               max = strtoull (v, NULL, 10);
+               max = strtoull (cl, NULL, 10);
                w->rxdata = realloc (w->rxdata, w->rxlen = max + 1);
                if (!w->rxdata)
                   er = "Malloc fail";
             }
-            char *expect = xml_get (head, "@expect");
             if (expect && !strncmp (expect, "100", 3))
             {
                char *reply = "HTTP/1.1 100 Continue\r\n\r\n";
@@ -573,18 +630,29 @@ websocket_do_rx (websocket_t * w)
                w->rxdata[w->rxptr] = 0;
                if (websocket_debug)
                   fprintf (stderr, "Parse [%s]\n", (char *) w->rxdata);
-               xml_t data = xml_tree_parse_json ((char *) w->rxdata, "json");
-               if (w->path && w->path->callback)
+               if (w->path && w->path->callbackraw)
+               {                // Raw data callback
+                  if (websocket_debug)
+                     fprintf (stderr, "%p Post callback\n", w);
+                  er = w->path->callbackraw (NULL, head, w->rxptr, w->rxdata);
+                  head = NULL;  // assumed to consume head/data
+                  w->rxdata = NULL;     // consumed
+                  w->rxptr = 0;
+               } else if (w->path && w->path->callback)
                {                // Note can call a post with null if nothing posted
+                  xml_t data = xml_tree_parse_json ((char *) w->rxdata, "json");
                   if (websocket_debug)
                      fprintf (stderr, "%p Post callback\n", w);
                   er = w->path->callback (NULL, head, data);
                   head = NULL;  // assumed to consume head/data
-                  data = NULL;
                }
-               if (data)
-                  xml_tree_delete (data);
             }
+         } else if (w->path && w->path->callbackraw)
+         {
+            if (websocket_debug)
+               fprintf (stderr, "%p Get callback\n", w);
+            er = w->path->callbackraw (NULL, head, 0, NULL);
+            head = NULL;
          } else if (w->path && w->path->callback)
          {
             if (websocket_debug)
@@ -601,12 +669,12 @@ websocket_do_rx (websocket_t * w)
             er = "Bad request (not GET)";
          if (strcasecmp (v, "websocket"))
             er = "Bad upgrade header (not websocket)";
-         v = xml_get (head, "@sec-websocket-version");
+         v = xml_get (http, "@sec-websocket-version");
          if (!v)
             er = "No version";
          else if (atoi (v) != 13)
             er = "Bad version (not 13)";
-         v = xml_get (head, "@sec-websocket-key");
+         v = xml_get (http, "@sec-websocket-key");
          if (!v)
             er = "No websocket key";
          else
@@ -617,7 +685,13 @@ websocket_do_rx (websocket_t * w)
             SHA1_Update (&c, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11", 36);
             SHA1_Final (hash, &c);
          }
-         if (!er && w->path->callback)
+         if (!er && w->path->callbackraw)
+         {
+            if (websocket_debug)
+               fprintf (stderr, "%p Connect callback\n", w);
+            er = w->path->callbackraw (w, head, 0, NULL);
+            head = NULL;
+         } else if (!er && w->path->callback)
          {
             if (websocket_debug)
                fprintf (stderr, "%p Connect callback\n", w);
@@ -670,9 +744,11 @@ websocket_do_rx (websocket_t * w)
       if (er)
          return er;             // Error
    }
+
    w->rxptr = 0;                // next packet
    w->rxlen = 0;
-   free (w->rxdata);
+   if (w->rxdata)
+      free (w->rxdata);
    w->rxdata = NULL;
    {                            // Rx websocket packets
       while (1)
@@ -743,32 +819,47 @@ websocket_do_rx (websocket_t * w)
             if (!(head[1] & 0x80))
                return "Unmasked data";
             if (websocket_debug)
-               fprintf (stderr, "Rx [%.*s]\n", (int) w->rxlen, w->rxdata);
-            w->rxdata[w->rxlen] = 0;
+            {
+               fprintf (stderr, "Rx");
+               if ((head[0] & 0x0F) == 1)
+                  fprintf (stderr, " [%.*s]", (int) w->rxlen, w->rxdata);       // Text frame
+               else
+               {
+                  unsigned int p;
+                  for (p = 0; p < w->rxlen; p++)
+                     fprintf (stderr, " %02X", w->rxdata[p]);   // Binary data
+               }
+               fprintf (stderr, "\n");
+            }
+            w->rxdata[w->rxlen] = 0;    // Always add a NULL for safety
             if ((head[0] & 0xF) == 1 || (head[0] & 0xF) == 2)
             {                   // data
-               if (websocket_debug)
-                  fprintf (stderr, "Parse [%s]\n", (char *) w->rxdata);
-               xml_t xml = xml_tree_parse_json ((char *) w->rxdata, "json");
-               if (!xml)
-                  return "Bad JSON";
-               if (w->path && w->path->callback)
-               {
+               if (w->path && w->path->callbackraw)
+               {                // Raw callback
                   if (websocket_debug)
                      fprintf (stderr, "%p Data callback\n", w);
-                  char *e = w->path->callback (w, NULL, xml);
-                  xml = NULL;
+                  char *e = w->path->callbackraw (w, NULL, w->rxptr, w->rxdata);
+                  w->rxdata = NULL;     // Consumed
+                  w->rxptr = 0;
+                  if (e)
+                     return e;  // bad
+               } else if (w->path && w->path->callback)
+               {                // JSON callback
+                  xml_t xml = xml_tree_parse_json ((char *) w->rxdata, "json");
+                  if (!xml)
+                     return "Bad JSON";
+                  if (websocket_debug)
+                     fprintf (stderr, "%p Data callback\n", w);
+                  char *e = w->path->callback (w, NULL, xml);   // XML is consumed
                   if (e)
                      return e;  // bad
                }
-               if (xml)
-                  xml_tree_delete (xml);
             } else if ((head[0] & 0xF) == 8)
             {                   // Close
                return NULL;
             } else if ((head[0] & 0xF) == 9)
             {                   // Ping
-               head[0] = 0x8A;  // Pong
+               head[0] = 0x8A;  // Send Pong
                if (head[1] & 0x80)
                {                // Reply is not masked
                   head[1] &= ~0x80;
@@ -781,7 +872,7 @@ websocket_do_rx (websocket_t * w)
                txb->count = 1;
                txb->len = w->rxlen;
                txb->buf = w->rxdata;
-               memcpy (txb->head, head, txb->hlen = hlen);
+               memmove (txb->head, head, txb->hlen = hlen);
                w->rxdata = NULL;        // Used in this buffer
                txq_t *txq = malloc (sizeof (*txq));
                memset (txq, 0, sizeof (*txq));
@@ -795,7 +886,18 @@ websocket_do_rx (websocket_t * w)
                pthread_mutex_unlock (&w->mutex);
             } else if ((head[0] & 0xF) == 0xA)
             {                   // Pong
-               // Do nothing
+               struct timeval tv;
+               struct timezone tz;
+               gettimeofday (&tv, &tz);
+               unsigned long long pong = tv.tv_sec * 1000000ULL + tv.tv_usec;;
+               unsigned long long ping = 0;
+               if (w->rxlen == sizeof (ping))
+               {
+                  memcpy (&ping, w->rxdata, sizeof (ping));
+                  w->ping = pong - ping;
+                  if (websocket_debug)
+                     fprintf (stderr, "Pong %lluus\n", pong - ping);
+               }
             }
             w->rxptr = 0;       // next packet
             w->rxlen = 0;
@@ -976,13 +1078,13 @@ websocket_listen (void *p)
 }
 
 const char *
-websocket_bind (const char *port, const char *origin, const char *host, const char *path, const char *certfile, const char *keyfile,
-                websocket_callback_t * cb)
+websocket_bind_base (const char *hostport, const char *origin, const char *host, const char *path, const char *certfile,
+                     const char *keyfile, websocket_callback_t * cb, websocket_callback_raw_t * cbraw)
 {
-   if (!port)
-      port = (keyfile ? "https" : "http");
+   if (!hostport)
+      hostport = (keyfile ? "https" : "http");
    websocket_bind_t *b;
-   for (b = binds; b && strcmp (b->port, port); b = b->next);
+   for (b = binds; b && strcmp (b->port, hostport); b = b->next);
    if (!b)
    {
       if (!binds)
@@ -990,9 +1092,20 @@ websocket_bind (const char *port, const char *origin, const char *host, const ch
       // bind
       int s = -1;
       {                         // bind
+         char *port = strdupa (hostport);
+         char *host = NULL;
+         char *c = strrchr (port, '#');
+         if (c)
+         {
+            *c++ = 0;
+            host = port;
+            port = c;
+         }
+         if (websocket_debug)
+            fprintf (stderr, "Bind [%s] %s\n", host ? : "*", port);
        const struct addrinfo hints = { ai_flags: AI_PASSIVE, ai_socktype: SOCK_STREAM, ai_family:AF_INET6 };
          struct addrinfo *res = NULL;
-         if (getaddrinfo (NULL, port, &hints, &res))
+         if (getaddrinfo (host, port, &hints, &res))
             return "Failed to get address info";
          if (!res)
             return "Cannot find port";
@@ -1016,7 +1129,7 @@ websocket_bind (const char *port, const char *origin, const char *host, const ch
          b->certfile = strdup (certfile);
       if (keyfile)
          b->keyfile = strdup (keyfile);
-      b->port = strdup (port);
+      b->port = strdup (hostport);
       b->socket = s;
       if (keyfile)
       {
@@ -1059,11 +1172,24 @@ websocket_bind (const char *port, const char *origin, const char *host, const ch
    if (path)
       p->path = strdup (path);
    p->callback = cb;
+   p->callbackraw = cbraw;
    pthread_mutex_lock (&b->mutex);
    p->next = b->paths;
    b->paths = p;
    pthread_mutex_unlock (&b->mutex);
    return NULL;                 // OK
+}
+
+const char *
+websocket_send_raw (int num, websocket_t ** w, size_t datalen, const unsigned char *data)
+{                               // Send data to web sockets, send with NULL to close, does not consume data - data assumed to be malloc'd
+   txb_t *txb = txb_new_data (datalen, data);
+   int p;
+   for (p = 0; p < num; p++)
+      if (w[p])
+         txb_queue (w[p], txb);
+   txb_done (txb);
+   return NULL;
 }
 
 const char *
