@@ -773,7 +773,7 @@ websocket_do_rx (websocket_t * w)
                int l = (head[1] & 0x7F);
                if (l == 126)
                   hlen += 2;    // len
-               else if (l == 126)
+               else if (l == 127)
                   hlen += 8;    // len
             }
          }
