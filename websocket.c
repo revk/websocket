@@ -125,18 +125,24 @@ struct websocket_s
 unsigned long
 websocket_ping (websocket_t * w)
 {                               // Ping data
+   if (!w)
+      return 0;
    return w->ping;
 }
 
 void *
 websocket_data (websocket_t * w)
 {                               // Link to a void*
+   if (!w)
+      return NULL;
    return w->data;
 }
 
 void
 websocket_set_data (websocket_t * w, void *data)
 {                               // Link to a void*
+   if (!w)
+      return;
    w->data = data;
 }
 
@@ -1103,23 +1109,51 @@ websocket_bind_base (const char *hostport, const char *origin, const char *host,
          }
          if (websocket_debug)
             fprintf (stderr, "Bind [%s] %s\n", host ? : "*", port);
-       const struct addrinfo hints = { ai_flags: AI_PASSIVE, ai_socktype: SOCK_STREAM, ai_family:AF_INET6 };
-         struct addrinfo *res = NULL;
+       const struct addrinfo hints = { ai_flags: AI_PASSIVE, ai_socktype: SOCK_STREAM, ai_family:AF_UNSPEC };
+         struct addrinfo *res = NULL,
+            *r;
          if (getaddrinfo (host, port, &hints, &res))
             return "Failed to get address info";
          if (!res)
             return "Cannot find port";
-         s = socket (res->ai_family, res->ai_socktype, res->ai_protocol);
-         if (s < 0)
-            return "Cannot create socket";
-         int on = 1;
-         if (setsockopt (s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof (on)))
-            return "Failed to set socket option";
-         if (bind (s, res->ai_addr, res->ai_addrlen))
-            return "Failed to bind to address";
-         if (listen (s, 10))
-            return "Could not listen on port";
+         const char *err = NULL;
+         for (r = res; r && r->ai_family != AF_INET6; r = r->ai_next);
+         if (!r)
+            r = res;
+         for (; r; r = r->ai_next)
+         {
+            s = socket (r->ai_family, r->ai_socktype, r->ai_protocol);
+            if (s < 0)
+            {
+               err = "Cannot create socket";
+               continue;
+            }
+            int on = 1;
+            if (setsockopt (s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof (on)))
+            {
+               close (s);
+               err = "Failed to set socket option";
+               continue;
+            }
+            if (bind (s, r->ai_addr, r->ai_addrlen))
+            {
+               close (s);
+               err = "Failed to bind to address";
+               continue;
+            }
+            if (listen (s, 10))
+            {
+               close (s);
+               err = "Could not listen on port";
+               continue;
+            }
+            // Worked
+            err = NULL;
+            break;
+         }
          freeaddrinfo (res);
+         if (err)
+            return err;
       }
       // allocate
       b = malloc (sizeof (*b));
