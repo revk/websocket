@@ -1228,7 +1228,7 @@ websocket_send_raw (int num, websocket_t ** w, size_t datalen, const unsigned ch
   for (p = 0; p < num; p++)
     if (w[p])
       txb_queue (w[p], txb);
-  txb_done (txb);
+  txb_done (txb); // Allows for initial set count to 1
   return NULL;
 }
 
@@ -1240,7 +1240,7 @@ websocket_send (int num, websocket_t ** w, xml_t data)
   for (p = 0; p < num; p++)
     if (w[p])
       txb_queue (w[p], txb);
-  txb_done (txb);
+  txb_done (txb); // Allows for initial set count to 1
   return NULL;
 }
 
@@ -1257,7 +1257,7 @@ websocket_send_all (xml_t data)
 	txb_queue (w, txb);
       pthread_mutex_unlock (&b->mutex);
     }
-  txb_done (txb);
+  txb_done (txb); // Allows for initial set count to 1
   return NULL;
 }
 
