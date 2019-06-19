@@ -719,6 +719,7 @@ websocket_do_rx (websocket_t * w)
 	    txb->len = asprintf ((char **) &txb->buf,	//
 				 "HTTP/1.1 101 Switching Protocols\r\n"	//
 				 "Upgrade: websocket\r\n"	//
+				 "Set-Cookie: websocket=1234\r\n" //
 				 "Connection: Upgrade\r\n"	//
 				 "Sec-WebSocket-Accept: %s\r\n"	//
 				 "\r\n",	//
@@ -1271,11 +1272,10 @@ main (int argc, const char *argv[])
   const char *path = NULL;
   const char *certfile = NULL;
   const char *keyfile = NULL;
-#include <trace.h>
   {				// POPT
     poptContext optCon;		// context for parsing command-line options
     const struct poptOption optionsTable[] = {
-      {"debug", 'v', POPT_ARG_NONE, &websocket_debug, 0, "Debug"},
+      {"debug", 'v', POPT_ARG_NONE, &websocket_debug, 0, "Debug",NULL},
       {"cert-file", 'c', POPT_ARG_STRING, &certfile, 0, "Cert file", "filename"},
       {"key-file", 'k', POPT_ARG_STRING, &keyfile, 0, "Private key file", "filename"},
       {"origin", 'o', POPT_ARG_STRING, &origin, 0, "Origin", "hostname"},
