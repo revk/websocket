@@ -719,7 +719,6 @@ websocket_do_rx (websocket_t * w)
 	    txb->len = asprintf ((char **) &txb->buf,	//
 				 "HTTP/1.1 101 Switching Protocols\r\n"	//
 				 "Upgrade: websocket\r\n"	//
-				 "Set-Cookie: websocket=1234\r\n" //
 				 "Connection: Upgrade\r\n"	//
 				 "Sec-WebSocket-Accept: %s\r\n"	//
 				 "\r\n",	//
