@@ -37,6 +37,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/poll.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
@@ -51,6 +53,8 @@
 #include <pthread.h>
 #include <axl.h>
 #include <websocket.h>
+
+const char wscookie[] = "wssession";
 
 int websocket_debug = 0;
 
@@ -507,6 +511,7 @@ websocket_do_rx (websocket_t * w)
     http = xml_element_add (head, "http");	// Sub object if using raw logic
     xml_element_set_content (http, (char *) p);	// The URL
     p = eol;			// First header (these overwrite any user sent attributes)
+    char *session = NULL;
     // Extract headers
     while (p < e)
       {
@@ -552,10 +557,64 @@ websocket_do_rx (websocket_t * w)
 	  }
 	else
 	  xml_attribute_set (http, (char *) p, (char *) eoh);
+	if (!strcmp ((char *) p, "cookie"))
+	  {			// Scan for our session cookie
+	    char *data = (char *) eoh;
+	    int l = strlen (wscookie);
+	    while (*data)
+	      {
+		while (*data && isspace (*data))
+		  data++;
+		if (!strncmp (data, wscookie, l) && !isalnum (data[l]))
+		  {		// Looks like out cookie
+		    data += l;
+		    while (*data && isspace (*data))
+		      data++;
+		    if (*data == '=')
+		      {
+			data++;
+			while (*data && isspace (*data))
+			  data++;
+			char *e = data;
+			while (*e && *e != ';')
+			  e++;
+			while (e > data && isspace (e[-1]))
+			  e--;
+			session = malloc (e + 1 - data);
+			if (!session)
+			  errx (1, "malloc");
+			memcpy (session, data, e - data);
+			session[e - data] = 0;
+		      }
+		    break;
+		  }
+		while (*data && *data != ';')
+		  data++;
+		if (*data == ';')
+		  data++;
+	      }
+	  }
 	p = eol;
 	if (p == e || *p < ' ')
 	  break;		// Odd
       }
+    if (!session)
+      {				// Make a session id
+	session = malloc (65);
+	if (!session)
+	  errx (1, "malloc");
+	int r = open ("/dev/urandom", O_RDONLY);
+	if (r < 0)
+	  err (1, "Random");
+	if (read (r, session, 64) != 64)
+	  err (1, "Random");
+	int p;
+	for (p = 0; p < 64; p++)
+	  session[p] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"[session[p] & 31];
+	session[p] = 0;
+	close (r);
+      }
+    xml_add (head, "@session", session);
     char *host = xml_get (http, "@host");
     char *origin = xml_get (http, "@origin");
     xml_attribute_set (head, "IP", w->from);
@@ -675,6 +734,12 @@ websocket_do_rx (websocket_t * w)
       }
     else
       {				// Web socket
+	host = strdupa (host);	// We free before using it otherwise
+	{			// Strip port
+	  char *p = strrchr (host, ':');
+	  if (*p)
+	    *p = 0;
+	}
 	unsigned char hash[SHA_DIGEST_LENGTH] = { };
 	if (strcmp (xml_element_name (head), "get"))
 	  er = "Bad request (not GET)";
@@ -720,9 +785,10 @@ websocket_do_rx (websocket_t * w)
 				 "HTTP/1.1 101 Switching Protocols\r\n"	//
 				 "Upgrade: websocket\r\n"	//
 				 "Connection: Upgrade\r\n"	//
+				 "Set-Cookie: %s=%s; Path=%s; Domain=%s%s\r\n"	//
 				 "Sec-WebSocket-Accept: %s\r\n"	//
 				 "\r\n",	//
-				 xml_base64 (SHA_DIGEST_LENGTH, hash));
+				 wscookie, session, path->path ? : url, host, w->ss ? "; Secure" : "", xml_base64 (SHA_DIGEST_LENGTH, hash));
 	    if (txb->len <= 0)
 	      er = "Bad asprintf";
 	    else
@@ -1228,7 +1294,7 @@ websocket_send_raw (int num, websocket_t ** w, size_t datalen, const unsigned ch
   for (p = 0; p < num; p++)
     if (w[p])
       txb_queue (w[p], txb);
-  txb_done (txb); // Allows for initial set count to 1
+  txb_done (txb);		// Allows for initial set count to 1
   return NULL;
 }
 
@@ -1240,7 +1306,7 @@ websocket_send (int num, websocket_t ** w, xml_t data)
   for (p = 0; p < num; p++)
     if (w[p])
       txb_queue (w[p], txb);
-  txb_done (txb); // Allows for initial set count to 1
+  txb_done (txb);		// Allows for initial set count to 1
   return NULL;
 }
 
@@ -1257,7 +1323,7 @@ websocket_send_all (xml_t data)
 	txb_queue (w, txb);
       pthread_mutex_unlock (&b->mutex);
     }
-  txb_done (txb); // Allows for initial set count to 1
+  txb_done (txb);		// Allows for initial set count to 1
   return NULL;
 }
 
@@ -1274,7 +1340,7 @@ main (int argc, const char *argv[])
   {				// POPT
     poptContext optCon;		// context for parsing command-line options
     const struct poptOption optionsTable[] = {
-      {"debug", 'v', POPT_ARG_NONE, &websocket_debug, 0, "Debug",NULL},
+      {"debug", 'v', POPT_ARG_NONE, &websocket_debug, 0, "Debug", NULL},
       {"cert-file", 'c', POPT_ARG_STRING, &certfile, 0, "Cert file", "filename"},
       {"key-file", 'k', POPT_ARG_STRING, &keyfile, 0, "Private key file", "filename"},
       {"origin", 'o', POPT_ARG_STRING, &origin, 0, "Origin", "hostname"},
