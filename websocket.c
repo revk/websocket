@@ -737,7 +737,7 @@ websocket_do_rx (websocket_t * w)
 	host = strdupa (host);	// We free before using it otherwise
 	{			// Strip port
 	  char *p = strrchr (host, ':');
-	  if (*p)
+	  if (p)
 	    *p = 0;
 	}
 	unsigned char hash[SHA_DIGEST_LENGTH] = { };
