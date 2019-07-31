@@ -33,6 +33,7 @@
 #include <popt.h>
 #include <time.h>
 #include <sys/time.h>
+#include <sys/resource.h>
 #include <syslog.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -272,7 +273,7 @@ websocket_tx (void *p)
          {                      // Header
             if ((w->txq->data->head[0] & 0x0F) == 0x08)
                w->closed = 1;   // Sent a close
-            while (ptr < len)
+            while (ptr < w->txq->data->hlen)
             {
                if (w->ss)
                   len = SSL_write (w->ss, w->txq->data->head + ptr, w->txq->data->hlen - ptr);
@@ -574,7 +575,7 @@ websocket_do_rx (websocket_t * w)
                while (*data && isspace (*data))
                   data++;
                if (!strncmp (data, wscookie, l) && !isalnum (data[l]))
-               {                // Looks like out cookie
+               {                // Looks like our cookie
                   data += l;
                   while (*data && isspace (*data))
                      data++;
@@ -642,6 +643,7 @@ websocket_do_rx (websocket_t * w)
       {
          if (head)
             xml_tree_delete (head);
+         free (session);
          return "Path not found";
       }
       w->path = path;
@@ -824,6 +826,7 @@ websocket_do_rx (websocket_t * w)
       }
       if (head)
          xml_tree_delete (head);
+      free (session);
       if (er)
          return er;             // Error
    }
