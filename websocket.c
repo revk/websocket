@@ -344,6 +344,8 @@ websocket_tx (void *p)
       int s = poll (&p, 1, (now < nextping) ? (nextping - now) * 1000 : 1000);
       if (!s)
          continue;
+      if (s < 0)
+         break;
       // Wait for new data to be added to queue
       char poke;
       ssize_t len = read (w->pipe[0], &poke, sizeof (poke));
@@ -1167,6 +1169,7 @@ const char *
 websocket_bind_base (const char *hostport, const char *origin, const char *host, const char *path, const char *certfile,
                      const char *keyfile, websocket_callback_t * cb, websocket_callback_raw_t * cbraw)
 {
+   signal (SIGPIPE, SIG_IGN);
    if (!hostport)
       hostport = (keyfile ? "https" : "http");
    websocket_bind_t *b;
