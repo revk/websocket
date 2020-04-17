@@ -50,7 +50,6 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <err.h>
-#include <execinfo.h>
 #include <pthread.h>
 #include <axl.h>
 #include <websocket.h>
