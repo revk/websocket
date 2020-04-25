@@ -264,79 +264,82 @@ websocket_tx (void *p)
    {
       time_t now = time (0);
       // Send data if we can
-      if (w->txq && w->connected)
+      if (w->connected)
       {
-         ssize_t len = 0;
-         size_t ptr = 0;
-         if (w->txq->data->hlen)
-         {                      // Header
-            if ((w->txq->data->head[0] & 0x0F) == 0x08)
-               w->closed = 1;   // Sent a close
-            while (ptr < w->txq->data->hlen)
+         if (w->txq)
+         {                      // Data to send
+            ssize_t len = 0;
+            size_t ptr = 0;
+            if (w->txq->data->hlen)
+            {                   // Header
+               if ((w->txq->data->head[0] & 0x0F) == 0x08)
+                  w->closed = 1;        // Sent a close
+               while (ptr < w->txq->data->hlen)
+               {
+                  if (w->ss)
+                     len = SSL_write (w->ss, w->txq->data->head + ptr, w->txq->data->hlen - ptr);
+                  else
+                     len = send (w->socket, w->txq->data->head + ptr, w->txq->data->hlen - ptr, 0);
+                  if (len <= 0)
+                     break;
+                  ptr += len;
+               }
+               if (websocket_debug)
+               {
+                  fprintf (stderr, "Tx Header");
+                  int p;
+                  for (p = 0; p < w->txq->data->hlen; p++)
+                     fprintf (stderr, " %02X", w->txq->data->head[p]);
+                  fprintf (stderr, "\n");
+               }
+            }
+            ptr = 0;
+            while (ptr < w->txq->data->len)
             {
                if (w->ss)
-                  len = SSL_write (w->ss, w->txq->data->head + ptr, w->txq->data->hlen - ptr);
+                  len = SSL_write (w->ss, w->txq->data->buf + ptr, w->txq->data->len - ptr);
                else
-                  len = send (w->socket, w->txq->data->head + ptr, w->txq->data->hlen - ptr, 0);
+                  len = send (w->socket, w->txq->data->buf + ptr, w->txq->data->len - ptr, 0);
                if (len <= 0)
-                  break;
+                  break;        // Failed
+               if (websocket_debug)
+                  fprintf (stderr, "Tx [%.*s]\n", (int) len, w->txq->data->buf + ptr);
                ptr += len;
             }
+            nextq ();
+            if (w->closed || len <= 0)
+               break;
+            if (w->txq)
+               continue;        // More data
+         } else if (now > nextping)
+         {                      // Send Ping
+            nextping = now + 60;
+            struct timeval tv;
+            struct timezone tz;
+            gettimeofday (&tv, &tz);
+            unsigned long long us = tv.tv_sec * 1000000ULL + tv.tv_usec;;
+            unsigned char ping[2 + sizeof (us)] = { 0x89, sizeof (us) };
+            memcpy (ping + 2, &us, sizeof (us));
+            int p = 0,
+               l = sizeof (ping),
+               len;
             if (websocket_debug)
             {
-               fprintf (stderr, "Tx Header");
-               int p;
-               for (p = 0; p < w->txq->data->hlen; p++)
-                  fprintf (stderr, " %02X", w->txq->data->head[p]);
+               fprintf (stderr, "Tx ");
+               for (len = 0; len < l; len++)
+                  fprintf (stderr, " %02X", ping[len]);
                fprintf (stderr, "\n");
             }
-         }
-         ptr = 0;
-         while (ptr < w->txq->data->len)
-         {
-            if (w->ss)
-               len = SSL_write (w->ss, w->txq->data->buf + ptr, w->txq->data->len - ptr);
-            else
-               len = send (w->socket, w->txq->data->buf + ptr, w->txq->data->len - ptr, 0);
-            if (len <= 0)
-               break;           // Failed
-            if (websocket_debug)
-               fprintf (stderr, "Tx [%.*s]\n", (int) len, w->txq->data->buf + ptr);
-            ptr += len;
-         }
-         nextq ();
-         if (w->closed || len <= 0)
-            break;
-         if (w->txq)
-            continue;           // More data
-      } else if (now > nextping)
-      {                         // Send Ping
-         nextping = now + 60;
-         struct timeval tv;
-         struct timezone tz;
-         gettimeofday (&tv, &tz);
-         unsigned long long us = tv.tv_sec * 1000000ULL + tv.tv_usec;;
-         unsigned char ping[2 + sizeof (us)] = { 0x89, sizeof (us) };
-         memcpy (ping + 2, &us, sizeof (us));
-         int p = 0,
-            l = sizeof (ping),
-            len;
-         if (websocket_debug)
-         {
-            fprintf (stderr, "Tx ");
-            for (len = 0; len < l; len++)
-               fprintf (stderr, " %02X", ping[len]);
-            fprintf (stderr, "\n");
-         }
-         while (p < l)
-         {
-            if (w->ss)
-               len = SSL_write (w->ss, ping + p, l - p);
-            else
-               len = send (w->socket, ping + p, l - p, 0);
-            if (len <= 0)
-               break;
-            p += len;
+            while (p < l)
+            {
+               if (w->ss)
+                  len = SSL_write (w->ss, ping + p, l - p);
+               else
+                  len = send (w->socket, ping + p, l - p, 0);
+               if (len <= 0)
+                  break;
+               p += len;
+            }
          }
       }
       struct pollfd p = { w->pipe[0], POLLIN, 0 };
