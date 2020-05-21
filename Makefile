@@ -1,4 +1,4 @@
-all: git websocket.o websocket
+all: git websocket.o
 
 websocket.o: websocket.c
 	cc -g -Wall -Wextra -O -c -o websocket.o websocket.c -I. -IAJL -pthread -D_GNU_SOURCE
