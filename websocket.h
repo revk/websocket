@@ -20,8 +20,8 @@
 typedef struct websocket_s websocket_t;        // Handle for connected web sockets
 
 // Callback function (raw functions pass len+data, otherwise object is parsed from JSON and passed as an XML type)
-typedef char *websocket_callback_t (websocket_t*,j_t head, j_t data);     // return NULL if OK, else connection is closed/rejected
-typedef char *websocket_callback_raw_t (websocket_t*,j_t head, size_t datalen,const unsigned char *data);     // return NULL if OK, else connection is closed/rejected
+typedef char *websocket_callback_t (websocket_t*,xml_t head, xml_t data);     // return NULL if OK, else connection is closed/rejected
+typedef char *websocket_callback_raw_t (websocket_t*,xml_t head, size_t datalen,const unsigned char *data);     // return NULL if OK, else connection is closed/rejected
 // The callback function is used in several ways. Where head/data are defined they are assumed to be consumed / freed by the callback
 // Case			websocket_t	head	data
 // WebSocket connect	Defined		Defined	NULL
@@ -50,9 +50,9 @@ typedef char *websocket_callback_raw_t (websocket_t*,j_t head, size_t datalen,co
 const char *websocket_bind_base (const char *port,const char *origin,const char *host,const char *path, const char *certfile,const char *keyfile, websocket_callback_t*,websocket_callback_raw_t*);
 #define websocket_bind(port,origin,host,path,cert,key,cb) websocket_bind_base(port,origin,host,path,cert,key,cb,NULL)
 #define websocket_bind_raw(port,origin,host,path,cert,key,cb) websocket_bind_base(port,origin,host,path,cert,key,NULL,cb)
-const char *websocket_send (int num,websocket_t**, j_t);        // Send data to web sockets, send with NULL to close - entries allowed to be NULL to skip them
+const char *websocket_send (int num,websocket_t**, xml_t);        // Send data to web sockets, send with NULL to close - entries allowed to be NULL to skip them
 const char *websocket_send_raw (int num,websocket_t**, size_t datalen,const unsigned char *data);        // Send data to web sockets, send with NULL to close - entries allowed to be NULL to skip them
-const char *websocket_send_all(j_t data); // Send data to all web sockets.
+const char *websocket_send_all(xml_t data); // Send data to all web sockets.
 unsigned long websocket_ping(websocket_t * w); // Latest ping data (us)
 
 // To help linking in

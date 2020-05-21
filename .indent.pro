@@ -1,1 +1,0 @@
--bbo -bc -bl -bli0 -cdw -ce -hnl -i3 -l320 -lp -nut
