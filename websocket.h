@@ -17,18 +17,18 @@
        along with this program.  If not, see <http://www.gnu.org/licenses/>.
      */
 
-typedef struct websocket_s websocket_t;        // Handle for connected web sockets
+typedef struct websocket_s websocket_t; // Handle for connected web sockets
 
-// Callback function (raw functions pass len+data, otherwise object is parsed from JSON and passed as an XML type)
-typedef char *websocket_callback_t (websocket_t*,j_t head, j_t data);     // return NULL if OK, else connection is closed/rejected
-typedef char *websocket_callback_raw_t (websocket_t*,j_t head, size_t datalen,const unsigned char *data);     // return NULL if OK, else connection is closed/rejected
+// Callback function (raw functions pass len+data, otherwise object is parsed from JSON)
+typedef char *websocket_callback_t (websocket_t *, j_t head, j_t data); // return NULL if OK, else connection is closed/rejected
+typedef char *websocket_callback_raw_t (websocket_t *, j_t head, size_t datalen, const unsigned char *data);    // return NULL if OK, else connection is closed/rejected
 // The callback function is used in several ways. Where head/data are defined they are assumed to be consumed / freed by the callback
-// Case			websocket_t	head	data
-// WebSocket connect	Defined		Defined	NULL
-// WebSocket receive	Defined		NULL	Defined
-// WebSocket close	Defined		NULL	NULL
-// HTTP GET		NULL		Defined	NULL
-// HTTP POST		NULL		Defined	Defined/NULL	(a POST with no valid JSON calls with NULL data, see head name for "get"/"post")
+// Case                 websocket_t     head    data
+// WebSocket connect    Defined         Defined NULL
+// WebSocket receive    Defined         NULL    Defined
+// WebSocket close      Defined         NULL    NULL
+// HTTP GET             NULL            Defined NULL
+// HTTP POST            NULL            Defined Defined/NULL    (a POST with no valid JSON calls with NULL data, see head name for "get"/"post")
 //
 // Head contains
 //  IP attribute with the IP address of the connection
@@ -47,14 +47,14 @@ typedef char *websocket_callback_raw_t (websocket_t*,j_t head, size_t datalen,co
 // port can be NULL for 80/443
 // keyfile means wss
 // Return is NULL if OK, else error string
-const char *websocket_bind_base (const char *port,const char *origin,const char *host,const char *path, const char *certfile,const char *keyfile, websocket_callback_t*,websocket_callback_raw_t*);
+const char *websocket_bind_base (const char *port, const char *origin, const char *host, const char *path, const char *certfile, const char *keyfile, websocket_callback_t *, websocket_callback_raw_t *);
 #define websocket_bind(port,origin,host,path,cert,key,cb) websocket_bind_base(port,origin,host,path,cert,key,cb,NULL)
 #define websocket_bind_raw(port,origin,host,path,cert,key,cb) websocket_bind_base(port,origin,host,path,cert,key,NULL,cb)
-const char *websocket_send (int num,websocket_t**, j_t);        // Send data to web sockets, send with NULL to close - entries allowed to be NULL to skip them
-const char *websocket_send_raw (int num,websocket_t**, size_t datalen,const unsigned char *data);        // Send data to web sockets, send with NULL to close - entries allowed to be NULL to skip them
-const char *websocket_send_all(j_t data); // Send data to all web sockets.
-unsigned long websocket_ping(websocket_t * w); // Latest ping data (us)
+const char *websocket_send (int num, websocket_t **, j_t);      // Send data to web sockets, send with NULL to close - entries allowed to be NULL to skip them
+const char *websocket_send_raw (int num, websocket_t **, size_t datalen, const unsigned char *data);    // Send data to web sockets, send with NULL to close - entries allowed to be NULL to skip them
+const char *websocket_send_all (j_t data);      // Send data to all web sockets.
+unsigned long websocket_ping (websocket_t * w); // Latest ping data (us)
 
 // To help linking in
-void *websocket_data(websocket_t*);
-void websocket_set_data(websocket_t*,void*);
+void *websocket_data (websocket_t *);
+void websocket_set_data (websocket_t *, void *);

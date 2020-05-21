@@ -169,7 +169,7 @@ txb_done (txb_t * b)
 
 static txb_t *
 txb_new_data (size_t len, const unsigned char *buf)
-{                               // Make a block from XML (count set to 1) - assuming buf malloc'd
+{                               // Make a block from JSON (count set to 1) - assuming buf malloc'd
    txb_t *txb = malloc (sizeof (*txb));
    memset (txb, 0, sizeof (*txb));
    pthread_mutex_init (&txb->mutex, NULL);
@@ -210,14 +210,14 @@ txb_new_data (size_t len, const unsigned char *buf)
 
 static txb_t *
 txb_new (j_t d)
-{                               // Make a block from XML (count set to 1)
+{                               // Make a block from JSON (count set to 1)
    if (!d)
       return txb_new_data (0, NULL);
    char *buf = NULL;
    size_t len = 0;
    FILE *out = open_memstream (&buf, &len);
    if (d)
-      j_write(d,out);
+      j_write (d, out);
    return txb_new_data (len, (unsigned char *) buf);
 }
 
@@ -474,8 +474,8 @@ websocket_do_rx (websocket_t * w)
          *eol++ = 0;
       if (eol < e && *eol == '\n')
          *eol++ = 0;
-      j_t head = j_create();
-      j_add_string(head,"method",(char*) w->rxdata);
+      j_t head = j_create ();
+      j_add_string (head, "method", (char *) w->rxdata);
       char *url = (char *) p;
       char *query = NULL;
       for (query = url; *query && *query != '?'; query++);
@@ -483,8 +483,8 @@ websocket_do_rx (websocket_t * w)
       {                         // decode query args and add to header too
          *query++ = 0;
          j_t q = head;
-         q = j_add_object(head,"query");
-	 j_add_string(q,"query", query);    // New format creates query as sub object of head
+         q = j_add_object (head, "query");
+         j_add_string (q, "query", query);      // New format creates query as sub object of head
          while (*query)
          {                      // URL decode
             char *p = query,
@@ -514,13 +514,13 @@ websocket_do_rx (websocket_t * w)
             }
             if (*p == '&')
                *p++ = 0;
-            j_add_string(q,query, v);
+            j_add_string (q, query, v);
             query = p;
          }
       }
       j_t http = head;
-      http = j_add_object (head, "http");    // Sub object if using raw logic
-      j_add_string(http,"URL",(char*)p);
+      http = j_add_object (head, "http");       // Sub object if using raw logic
+      j_add_string (http, "URL", (char *) p);
       p = eol;                  // First header (these overwrite any user sent attributes)
       char *session = NULL;
       // Extract headers
@@ -562,7 +562,7 @@ websocket_do_rx (websocket_t * w)
             {
                data = realloc (data, l + 1);
                data[l] = 0;
-               j_add_string(http, (char *) p, data);
+               j_add_string (http, (char *) p, data);
                free (data);
             }
          } else
@@ -652,7 +652,7 @@ websocket_do_rx (websocket_t * w)
       {                         // HTTP
          const char *cl = j_get (http, "content-length");
          const char *expect = j_get (http, "expect");
-         if (!strcmp (j_get (head,"method"), "post") || expect || cl)
+         if (!strcmp (j_get (head, "method"), "post") || expect || cl)
          {                      // data to receive
             if (ep < w->rxptr)
             {
@@ -716,8 +716,8 @@ websocket_do_rx (websocket_t * w)
                   w->rxptr = 0;
                } else if (w->path && w->path->callback)
                {                // Note can call a post with null if nothing posted
-                  j_t data = j_create();
-		  j_read_mem(data,(char *) w->rxdata); // TODO error?
+                  j_t data = j_create ();
+                  j_read_mem (data, (char *) w->rxdata);        // TODO error?
                   if (websocket_debug)
                      fprintf (stderr, "%p Post callback\n", w);
                   er = w->path->callback (NULL, head, data);
@@ -748,7 +748,7 @@ websocket_do_rx (websocket_t * w)
                *p = 0;
          }
          unsigned char hash[SHA_DIGEST_LENGTH] = { };
-         if (strcmp (j_get (head,"method"), "get"))
+         if (strcmp (j_get (head, "method"), "get"))
             er = "Bad request (not GET)";
          if (strcasecmp (v, "websocket"))
             er = "Bad upgrade header (not websocket)";
@@ -928,12 +928,13 @@ websocket_do_rx (websocket_t * w)
                      return e;  // bad
                } else if (w->path && w->path->callback)
                {                // JSON callback
-                  j_t json = j_create();
-		  const char *er=j_read_mem(json,(char *) w->rxdata);
-		  if(er)return (char*)er;
+                  j_t json = j_create ();
+                  const char *er = j_read_mem (json, (char *) w->rxdata);
+                  if (er)
+                     return (char *) er;
                   if (websocket_debug)
                      fprintf (stderr, "%p Data callback\n", w);
-                  char *e = w->path->callback (w, NULL, json);   // XML is consumed
+                  char *e = w->path->callback (w, NULL, json);  // JSON is consumed
                   if (e)
                      return e;  // bad
                }
@@ -1386,12 +1387,12 @@ main (int argc, const char *argv[])
       fprintf (stderr, "w=%p\n", w);
       if (head)
       {
-         j_write ( head,stderr);
+         j_write (head, stderr);
          j_delete (head);
       }
       if (data)
       {
-         j_write ( data,stderr);
+         j_write (data, stderr);
          j_delete (data);
       }
       if (!w)
