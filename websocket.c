@@ -627,7 +627,7 @@ websocket_do_rx (websocket_t * w)
       j_add_string (head, "session", session);
       const char *host = j_get (http, "host");
       const char *origin = j_get (http, "origin");
-      j_add_string (head, "ip", w->from);
+      j_add_string (head, "IP", w->from);
       int mismatch (const char *ref, const char *val)
       {
          if (!ref)
