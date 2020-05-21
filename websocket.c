@@ -520,7 +520,7 @@ websocket_do_rx (websocket_t * w)
       }
       j_t http = head;
       http = j_add_object (head, "http");       // Sub object if using raw logic
-      j_add_string (http, "URL", (char *) p);
+      j_add_string (http, "url", (char *) p);
       p = eol;                  // First header (these overwrite any user sent attributes)
       char *session = NULL;
       // Extract headers
