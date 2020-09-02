@@ -1,4 +1,6 @@
 *~
 *.swp
-websocket
-websocket.o
+websocketjson
+websocketjson.o
+websocketxml
+websocketxml.o

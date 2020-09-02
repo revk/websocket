@@ -17,18 +17,44 @@
        along with this program.  If not, see <http://www.gnu.org/licenses/>.
      */
 
-typedef struct websocket_s websocket_t;        // Handle for connected web sockets
+#ifdef	AXL_H
+#ifndef	USEAXL
+#define	USEAXL
+#endif
+#endif
 
-// Callback function (raw functions pass len+data, otherwise object is parsed from JSON and passed as an XML type)
-typedef char *websocket_callback_t (websocket_t*,xml_t head, xml_t data);     // return NULL if OK, else connection is closed/rejected
-typedef char *websocket_callback_raw_t (websocket_t*,xml_t head, size_t datalen,const unsigned char *data);     // return NULL if OK, else connection is closed/rejected
-// The callback function is used in several ways. Where head/data are defined they are assumed to be consumed / freed by the callback
-// Case			websocket_t	head	data
-// WebSocket connect	Defined		Defined	NULL
-// WebSocket receive	Defined		NULL	Defined
-// WebSocket close	Defined		NULL	NULL
-// HTTP GET		NULL		Defined	NULL
-// HTTP POST		NULL		Defined	Defined/NULL	(a POST with no valid JSON calls with NULL data, see head name for "get"/"post")
+#ifdef	AJL_H
+#ifndef	USEAJL
+#define	USEAJL
+#endif
+#endif
+
+#ifdef	USEAXL
+#include <axl.h>
+#endif
+#ifdef	USEAJL
+#include <ajl.h>
+#endif
+
+typedef struct websocket_s websocket_t; // Handle for connected web sockets
+
+// Callback function (raw functions pass len+data, otherwise object is parsed from JSON)
+#ifdef	USEAXL
+typedef char *websocket_callback_xml_t(websocket_t *, xml_t head, xml_t data);  // return NULL if OK, else connection is closed/rejected
+typedef char *websocket_callback_xmlraw_t(websocket_t *, xml_t head, size_t datalen, const unsigned char *data);        // return NULL if OK, else connection is closed/rejected
+#endif
+#ifdef	USEAJL
+typedef char *websocket_callback_json_t(websocket_t *, j_t head, j_t data);     // return NULL if OK, else connection is closed/rejected
+typedef char *websocket_callback_jsonraw_t(websocket_t *, j_t head, size_t datalen, const unsigned char *data); // return NULL if OK, else connection is closed/rejected
+#endif
+// The callback function is used in several ways.
+// IMPORTANT: Where head/data are defined they are assumed to be consumed / freed by the callback
+// Case                 websocket_t     head    data
+// WebSocket connect    Defined         Defined NULL
+// WebSocket receive    Defined         NULL    Defined
+// WebSocket close      Defined         NULL    NULL
+// HTTP GET             NULL            Defined NULL
+// HTTP POST            NULL            Defined Defined/NULL    (a POST with no valid JSON calls with NULL data, see head name for "get"/"post")
 //
 // Head contains
 //  IP attribute with the IP address of the connection
@@ -47,14 +73,42 @@ typedef char *websocket_callback_raw_t (websocket_t*,xml_t head, size_t datalen,
 // port can be NULL for 80/443
 // keyfile means wss
 // Return is NULL if OK, else error string
-const char *websocket_bind_base (const char *port,const char *origin,const char *host,const char *path, const char *certfile,const char *keyfile, websocket_callback_t*,websocket_callback_raw_t*);
-#define websocket_bind(port,origin,host,path,cert,key,cb) websocket_bind_base(port,origin,host,path,cert,key,cb,NULL)
-#define websocket_bind_raw(port,origin,host,path,cert,key,cb) websocket_bind_base(port,origin,host,path,cert,key,NULL,cb)
-const char *websocket_send (int num,websocket_t**, xml_t);        // Send data to web sockets, send with NULL to close - entries allowed to be NULL to skip them
-const char *websocket_send_raw (int num,websocket_t**, size_t datalen,const unsigned char *data);        // Send data to web sockets, send with NULL to close - entries allowed to be NULL to skip them
-const char *websocket_send_all(xml_t data); // Send data to all web sockets.
-unsigned long websocket_ping(websocket_t * w); // Latest ping data (us)
+typedef struct {
+   const char *port;
+   const char *origin;
+   const char *host;
+   const char *path;
+   const char *certfile;
+   const char *keyfile;
+#ifdef	USEAXL
+   websocket_callback_xml_t *xml;
+   websocket_callback_xmlraw_t *xmlraw;
+#endif
+#ifdef	USEAJL
+   websocket_callback_json_t *json;
+   websocket_callback_jsonraw_t *jsonraw;
+#endif
+} websocket_bindopts_t;
+#define	websocket_bind(...) websocket_bind_opts((websocket_bindopts_t){__VA_ARGS__})
+const char *websocket_bind_opts(websocket_bindopts_t);
+
+typedef struct {
+   int num;
+   websocket_t **ws;
+#ifdef	USEAXL
+   xml_t xml;
+#endif
+#ifdef	USEAJL
+   j_t json;
+#endif
+   size_t len;
+   unsigned char *data;
+} websocket_send_t;
+#define websocket_send(...) websocket_send_opts((websocket_send_t){__VA_ARGS__})
+const char *websocket_send_opts(websocket_send_t);
+
+unsigned long websocket_ping(websocket_t * w);  // Latest ping data (us)
 
 // To help linking in
-void *websocket_data(websocket_t*);
-void websocket_set_data(websocket_t*,void*);
+void *websocket_data(websocket_t *);
+void websocket_set_data(websocket_t *, void *);
