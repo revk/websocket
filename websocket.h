@@ -102,7 +102,7 @@ typedef struct {
    j_t json;
 #endif
    size_t len;
-   unsigned char *data;
+   const unsigned char *data;
 } websocket_send_t;
 #define websocket_send(...) websocket_send_opts((websocket_send_t){__VA_ARGS__})
 const char *websocket_send_opts(websocket_send_t);
