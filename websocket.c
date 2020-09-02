@@ -506,7 +506,7 @@ char *websocket_do_rx(websocket_t * w)
 #endif
 #ifdef	USEAJL
       j_t jhead = j_create();
-      j_store_string(jhead,"method",(char *) w->rxdata);
+      j_store_string(jhead, "method", (char *) w->rxdata);
 #endif
 
       char *url = (char *) p;
@@ -747,7 +747,8 @@ char *websocket_do_rx(websocket_t * w)
 #ifdef	USEAJL
       method = j_get(jhead, "method");
 #endif
-      if(!method) return "No method";
+      if (!method)
+         return "No method";
       if (!v)
       {                         // HTTP
          const char *cl = NULL,
@@ -901,7 +902,7 @@ char *websocket_do_rx(websocket_t * w)
             er = "Bad request (not GET)";
          if (strcasecmp(v, "websocket"))
             er = "Bad upgrade header (not websocket)";
-	 v=NULL;
+         v = NULL;
 #ifdef	USEAXL
          v = xml_get(xhttp, "@sec-websocket-version");
 #endif
@@ -912,7 +913,7 @@ char *websocket_do_rx(websocket_t * w)
             er = "No version";
          else if (atoi(v) != 13)
             er = "Bad version (not 13)";
-	 v=NULL;
+         v = NULL;
 #ifdef	USEAXL
          v = xml_get(xhttp, "@sec-websocket-key");
 #endif
@@ -1398,7 +1399,8 @@ const char *websocket_bind_opts(websocket_bindopts_t o)
          if (c)
          {
             *c++ = 0;
-            if(*port)host = port;
+            if (*port)
+               host = port;
             port = c;
          }
          if (websocket_debug)
@@ -1538,7 +1540,8 @@ const char *websocket_send_opts(websocket_send_t o)
    else if (o.xml)
       txb = txb_new_xml(o.xml);
 #endif
-
+   if (!txb)
+      txb = txb_new_data(0, NULL);      // A close
    if (!o.ws && !o.num)
    {                            // All
       websocket_bind_t *b;

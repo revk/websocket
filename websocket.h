@@ -106,6 +106,8 @@ typedef struct {
 } websocket_send_t;
 #define websocket_send(...) websocket_send_opts((websocket_send_t){__VA_ARGS__})
 const char *websocket_send_opts(websocket_send_t);
+// Send allows sending raw (if data/len set), or xml or json. If no raw, xml, or JSON, this is sending a close
+// If num=0 and ws is NULL, this is send to all
 
 unsigned long websocket_ping(websocket_t * w);  // Latest ping data (us)
 
