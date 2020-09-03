@@ -452,13 +452,16 @@ char *websocket_do_rx(websocket_t * w)
       unsigned int ep = 0;
       while (1)
       {
-         struct pollfd p = { w->socket, POLLIN, 0 };
-         int s = poll(&p, 1, 10000);
-         if (s <= 0)
+         if (!w->ss || !SSL_peek(w->ss, &(char) { 0 }, 1))
          {
-            if (websocket_debug)
-               fprintf(stderr, "Rx handshake [%.*s]\n", (int) w->rxptr, w->rxdata);
-            return "Handshake timeout";
+            struct pollfd p = { w->socket, POLLIN, 0 };
+            int s = poll(&p, 1, 10000);
+            if (s <= 0)
+            {
+               if (websocket_debug)
+                  fprintf(stderr, "Rx handshake [%.*s]\n", (int) w->rxptr, w->rxdata);
+               return "Handshake timeout";
+            }
          }
          if (w->rxlen - w->rxptr < 1000)
             w->rxdata = realloc(w->rxdata, w->rxlen += 1000);
@@ -572,7 +575,7 @@ char *websocket_do_rx(websocket_t * w)
       j_t jhttp = j_store_object(jhead, "http");
       j_store_string(jhttp, "url", (char *) p);
 #endif
-      p = eol;                  // First header (these overwrite any user sent attributes)
+      p = eol;                  // Start of headers
       char *session = NULL;
       // Extract headers
       while (p < e)
