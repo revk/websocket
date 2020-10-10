@@ -452,7 +452,8 @@ char *websocket_do_rx(websocket_t * w)
       unsigned int ep = 0;
       while (1)
       {
-         if (!w->ss || !SSL_peek(w->ss, &(char) { 0 }, 1))
+         if (!w->ss || !SSL_peek(w->ss, &(char)
+                                 { 0 }, 1))
          {
             struct pollfd p = { w->socket, POLLIN, 0 };
             int s = poll(&p, 1, 10000);
@@ -610,7 +611,7 @@ char *websocket_do_rx(websocket_t * w)
             eoh += 6;
             while (*eoh == ' ')
                eoh++;
-            char *data = NULL;
+            unsigned char *data = NULL;
 #ifdef	USEAXL
             {
                int l = xml_base64d((char *) eoh, &data);
@@ -618,7 +619,7 @@ char *websocket_do_rx(websocket_t * w)
                {
                   data = realloc(data, l + 1);
                   data[l] = 0;
-                  xml_attribute_set(xhttp, (char *) p, data);
+                  xml_attribute_set(xhttp, (char *) p, (char *) data);
                   free(data);
                }
             }
@@ -628,7 +629,7 @@ char *websocket_do_rx(websocket_t * w)
                int l = j_base64d((char *) eoh, &data);
                if (data)
                {
-                  j_store_stringn(jhttp, (char *) p, data, l);
+                  j_store_stringn(jhttp, (char *) p, (char *) data, l);
                   free(data);
                }
             }
