@@ -444,6 +444,18 @@ char *websocket_do_rx(websocket_t * w)
          return "Cannot create SSL server structure";
       if (!SSL_set_fd(w->ss, w->socket))
          return "Could not set client SSL fd";
+      if (w->bind->certfile)
+      {
+         int e = SSL_CTX_use_certificate_chain_file(w->bind->ctx, w->bind->certfile);
+         if (e != 1)
+            return "Cannot load cert file";
+      }
+      if (w->bind->keyfile)
+      {
+         int e = SSL_CTX_use_PrivateKey_file(w->bind->ctx, w->bind->keyfile, SSL_FILETYPE_PEM);
+         if (e != 1)
+            return "Cannot load key file";
+      }
       int r = SSL_accept(w->ss);
       if (r != 1)
          return "Could not establish SSL client connection";
@@ -1483,18 +1495,6 @@ const char *websocket_bind_opts(websocket_bindopts_t o)
          b->ctx = SSL_CTX_new(SSLv23_server_method());  // Negotiates TLS
          if (!b->ctx)
             return "Cannot create SSL CTX";
-         if (o.certfile)
-         {
-            int e = SSL_CTX_use_certificate_chain_file(b->ctx, o.certfile);
-            if (e != 1)
-               return "Cannot load cert file";
-         }
-         if (o.keyfile)
-         {
-            int e = SSL_CTX_use_PrivateKey_file(b->ctx, o.keyfile, SSL_FILETYPE_PEM);
-            if (e != 1)
-               return "Cannot load key file";
-         }
       }
       b->next = binds;
       binds = b;
