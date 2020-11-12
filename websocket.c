@@ -1141,7 +1141,7 @@ char *websocket_do_rx(websocket_t * w)
                {                // JSON callback
                   xml_t xml = xml_tree_parse_json((char *) w->rxdata, "json");
                   if (!xml)
-                     return "Bad JSON";
+                     return "Bad XML";
                   if (websocket_debug)
                      fprintf(stderr, "%p Data callback\n", w);
                   char *e = w->path->callbackxml(w, NULL, xml); // XML is consumed
@@ -1162,14 +1162,15 @@ char *websocket_do_rx(websocket_t * w)
                } else if (w->path && w->path->callbackjson)
                {                // JSON callback
                   j_t json = j_create();
-                  if (j_read_mem(json, (char *) w->rxdata, -1))
+		  char *e=j_read_mem(json, (char *) w->rxdata, -1);
+                  if (e)
                   {
                      j_delete(&json);
-                     return "Bad JSON";
+                     return e; // bad
                   }
                   if (websocket_debug)
                      fprintf(stderr, "%p Data callback\n", w);
-                  char *e = w->path->callbackjson(w, NULL, json);       // JSON is consumed
+                  e = w->path->callbackjson(w, NULL, json);       // JSON is consumed
                   if (e)
                      return e;  // bad
                }
