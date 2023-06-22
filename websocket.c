@@ -66,7 +66,8 @@ typedef struct websocket_path_s websocket_path_t;
 typedef websocket_t *websocket_p;
 
 typedef struct txb_s txb_t;
-struct txb_s {
+struct txb_s
+{
    volatile int count;          // how many instances in txqs
    pthread_mutex_t mutex;       // protect count
    unsigned char head[14];
@@ -77,12 +78,14 @@ struct txb_s {
 
 typedef struct txq_s txq_t;
 typedef txq_t *txq_p;
-struct txq_s {                  // Queue of transmit data
+struct txq_s
+{                               // Queue of transmit data
    volatile txq_p next;
    txb_t *data;
 };
 
-struct websocket_bind_s {       // The bound ports / threads
+struct websocket_bind_s
+{                               // The bound ports / threads
    websocket_bind_t *next;
    const char *port;
    const char *certfile;
@@ -94,7 +97,8 @@ struct websocket_bind_s {       // The bound ports / threads
    volatile websocket_p sessions;
 };
 
-struct websocket_path_s {       // The bound paths on a port
+struct websocket_path_s
+{                               // The bound paths on a port
    websocket_path_t *next;
    const char *host;            // Check host (null=wildcard)
    const char *path;            // Check path (null=wildcard)
@@ -109,7 +113,8 @@ struct websocket_path_s {       // The bound paths on a port
 #endif
 };
 
-struct websocket_s {            // The specific web socket instance
+struct websocket_s
+{                               // The specific web socket instance
    volatile websocket_p next;
    websocket_bind_t *bind;
    websocket_path_t *path;
@@ -122,34 +127,38 @@ struct websocket_s {            // The specific web socket instance
    long ping;                   // Ping time (us)
    pthread_mutex_t mutex;       // Protect volatile
    volatile txq_p txq,
-    txe;
+     txe;
    volatile int socket;         // rx socket
    volatile int pipe[2];        // pipe used to kick tx
    volatile unsigned char connected:1;
    volatile unsigned char closed:1;
 };
 
-void safe_write(int fd, const void *buf, size_t count)
+void
+safe_write (int fd, const void *buf, size_t count)
 {
-   if (write(fd, buf, count) < 0)
-      err(1, "Write failed");
+   if (write (fd, buf, count) < 0)
+      err (1, "Write failed");
 }
 
-unsigned long websocket_ping(websocket_t * w)
+unsigned long
+websocket_ping (websocket_t * w)
 {                               // Ping data
    if (!w)
       return 0;
    return w->ping;
 }
 
-void *websocket_data(websocket_t * w)
+void *
+websocket_data (websocket_t * w)
 {                               // Link to a void*
    if (!w)
       return NULL;
    return w->data;
 }
 
-void websocket_set_data(websocket_t * w, void *data)
+void
+websocket_set_data (websocket_t * w, void *data)
 {                               // Link to a void*
    if (!w)
       return;
@@ -157,23 +166,25 @@ void websocket_set_data(websocket_t * w, void *data)
 }
 
 static websocket_bind_t *binds = NULL;
-static void txb_done(txb_t * b)
+static void
+txb_done (txb_t * b)
 {                               // Count down and maybe even free
-   pthread_mutex_lock(&b->mutex);
+   pthread_mutex_lock (&b->mutex);
    int c = --b->count;
-   pthread_mutex_unlock(&b->mutex);
+   pthread_mutex_unlock (&b->mutex);
    if (!c)
    {                            // free
-      free(b->buf);
-      free(b);
+      free (b->buf);
+      free (b);
    }
 }
 
-static txb_t *txb_new_data(size_t len, const unsigned char *buf)
+static txb_t *
+txb_new_data (size_t len, const unsigned char *buf)
 {                               // Make a block from XML (count set to 1) - assuming buf malloc'd
-   txb_t *txb = malloc(sizeof(*txb));
-   memset(txb, 0, sizeof(*txb));
-   pthread_mutex_init(&txb->mutex, NULL);
+   txb_t *txb = malloc (sizeof (*txb));
+   memset (txb, 0, sizeof (*txb));
+   pthread_mutex_init (&txb->mutex, NULL);
    txb->len = len;
    txb->buf = (unsigned char *) buf;
    txb->count = 1;              // Initial count to one so not zapped whilst adding to queues
@@ -210,69 +221,74 @@ static txb_t *txb_new_data(size_t len, const unsigned char *buf)
 }
 
 #ifdef	USEAXL
-static txb_t *txb_new_xml(xml_t d)
+static txb_t *
+txb_new_xml (xml_t d)
 {                               // Make a block from XML (count set to 1)
    if (!d)
-      return txb_new_data(0, NULL);
+      return txb_new_data (0, NULL);
    char *buf = NULL;
    size_t len = 0;
-   FILE *out = open_memstream(&buf, &len);
+   FILE *out = open_memstream (&buf, &len);
    if (d)
-      xml_write_json(out, d);
-   fclose(out);
-   return txb_new_data(len, (unsigned char *) buf);
+      xml_write_json (out, d);
+   fclose (out);
+   return txb_new_data (len, (unsigned char *) buf);
 }
 #endif
 #ifdef	USEAJL
-static txb_t *txb_new_json(j_t d)
+static txb_t *
+txb_new_json (j_t d)
 {                               // Make a block from XML (count set to 1)
    if (!d)
-      return txb_new_data(0, NULL);
+      return txb_new_data (0, NULL);
    char *buf = NULL;
    size_t len = 0;
-   j_err(j_write_mem(d, &buf, &len));
-   return txb_new_data(len, (unsigned char *) buf);
+   j_err (j_write_mem (d, &buf, &len));
+   return txb_new_data (len, (unsigned char *) buf);
 }
 #endif
 
-static void txb_queue(websocket_t * w, txb_t * txb)
+static void
+txb_queue (websocket_t * w, txb_t * txb)
 {                               // Add a block to a websocket (NULL means close)
-   txq_t *txq = malloc(sizeof(*txq));
-   memset(txq, 0, sizeof(*txq));
+   txq_t *txq = malloc (sizeof (*txq));
+   memset (txq, 0, sizeof (*txq));
    txq->data = txb;
-   pthread_mutex_lock(&txb->mutex);
+   pthread_mutex_lock (&txb->mutex);
    txb->count++;
-   pthread_mutex_unlock(&txb->mutex);
-   pthread_mutex_lock(&w->mutex);
+   pthread_mutex_unlock (&txb->mutex);
+   pthread_mutex_lock (&w->mutex);
    if (w->txq)
       w->txe->next = txq;
    else
       w->txq = txq;
    w->txe = txq;
-   pthread_mutex_unlock(&w->mutex);
+   pthread_mutex_unlock (&w->mutex);
    char poke = 0;
-   pthread_mutex_lock(&w->mutex);
+   pthread_mutex_lock (&w->mutex);
    if (w->pipe[1] >= 0)
-      safe_write(w->pipe[1], &poke, sizeof(poke));
-   pthread_mutex_unlock(&w->mutex);
+      safe_write (w->pipe[1], &poke, sizeof (poke));
+   pthread_mutex_unlock (&w->mutex);
 }
 
-void *websocket_tx(void *p)
+void *
+websocket_tx (void *p)
 {                               // Tx thread
-   sigignore(SIGPIPE);
+   sigignore (SIGPIPE);
    websocket_t *w = p;
-   void nextq(void) {           // Unlink queue
-      pthread_mutex_lock(&w->mutex);
+   void nextq (void)
+   {                            // Unlink queue
+      pthread_mutex_lock (&w->mutex);
       txq_t *q = (txq_t *) w->txq;
       w->txq = q->next;
-      pthread_mutex_unlock(&w->mutex);
-      txb_done(q->data);
-      free(q);                  // queue freed
+      pthread_mutex_unlock (&w->mutex);
+      txb_done (q->data);
+      free (q);                 // queue freed
    }
-   time_t nextping = time(0) + 2;
+   time_t nextping = time (0) + 2;
    while (1)
    {
-      time_t now = time(0);
+      time_t now = time (0);
       // Send data if we can
       if (w->connected)
       {
@@ -287,36 +303,36 @@ void *websocket_tx(void *p)
                while (ptr < w->txq->data->hlen)
                {
                   if (w->ss)
-                     len = SSL_write(w->ss, w->txq->data->head + ptr, w->txq->data->hlen - ptr);
+                     len = SSL_write (w->ss, w->txq->data->head + ptr, w->txq->data->hlen - ptr);
                   else
-                     len = send(w->socket, w->txq->data->head + ptr, w->txq->data->hlen - ptr, 0);
+                     len = send (w->socket, w->txq->data->head + ptr, w->txq->data->hlen - ptr, 0);
                   if (len <= 0)
                      break;
                   ptr += len;
                }
                if (websocket_debug)
                {
-                  fprintf(stderr, "Tx Header");
+                  fprintf (stderr, "Tx Header");
                   int p;
                   for (p = 0; p < w->txq->data->hlen; p++)
-                     fprintf(stderr, " %02X", w->txq->data->head[p]);
-                  fprintf(stderr, "\n");
+                     fprintf (stderr, " %02X", w->txq->data->head[p]);
+                  fprintf (stderr, "\n");
                }
             }
             ptr = 0;
             while (ptr < w->txq->data->len)
             {
                if (w->ss)
-                  len = SSL_write(w->ss, w->txq->data->buf + ptr, w->txq->data->len - ptr);
+                  len = SSL_write (w->ss, w->txq->data->buf + ptr, w->txq->data->len - ptr);
                else
-                  len = send(w->socket, w->txq->data->buf + ptr, w->txq->data->len - ptr, 0);
+                  len = send (w->socket, w->txq->data->buf + ptr, w->txq->data->len - ptr, 0);
                if (len <= 0)
                   break;        // Failed
                if (websocket_debug)
-                  fprintf(stderr, "Tx [%.*s]\n", (int) len, w->txq->data->buf + ptr);
+                  fprintf (stderr, "Tx [%.*s]\n", (int) len, w->txq->data->buf + ptr);
                ptr += len;
             }
-            nextq();
+            nextq ();
             if (w->closed || len <= 0)
                break;
             if (w->txq)
@@ -326,26 +342,26 @@ void *websocket_tx(void *p)
             nextping = now + 60;
             struct timeval tv;
             struct timezone tz;
-            gettimeofday(&tv, &tz);
+            gettimeofday (&tv, &tz);
             unsigned long long us = tv.tv_sec * 1000000ULL + tv.tv_usec;;
-            unsigned char ping[2 + sizeof(us)] = { 0x89, sizeof(us) };
-            memcpy(ping + 2, &us, sizeof(us));
+            unsigned char ping[2 + sizeof (us)] = { 0x89, sizeof (us) };
+            memcpy (ping + 2, &us, sizeof (us));
             int p = 0,
-                l = sizeof(ping),
-                len;
+               l = sizeof (ping),
+               len;
             if (websocket_debug)
             {
-               fprintf(stderr, "Tx ");
+               fprintf (stderr, "Tx ");
                for (len = 0; len < l; len++)
-                  fprintf(stderr, " %02X", ping[len]);
-               fprintf(stderr, "\n");
+                  fprintf (stderr, " %02X", ping[len]);
+               fprintf (stderr, "\n");
             }
             while (p < l)
             {
                if (w->ss)
-                  len = SSL_write(w->ss, ping + p, l - p);
+                  len = SSL_write (w->ss, ping + p, l - p);
                else
-                  len = send(w->socket, ping + p, l - p, 0);
+                  len = send (w->socket, ping + p, l - p, 0);
                if (len <= 0)
                   break;
                p += len;
@@ -353,110 +369,111 @@ void *websocket_tx(void *p)
          }
       }
       struct pollfd p = { w->pipe[0], POLLIN, 0 };
-      int s = poll(&p, 1, (now < nextping) ? (nextping - now) * 1000 : 1000);
+      int s = poll (&p, 1, (now < nextping) ? (nextping - now) * 1000 : 1000);
       if (!s)
          continue;
       if (s < 0)
          break;
       // Wait for new data to be added to queue
       char poke;
-      ssize_t len = read(w->pipe[0], &poke, sizeof(poke));
+      ssize_t len = read (w->pipe[0], &poke, sizeof (poke));
       if (len <= 0)
          break;                 // Done
    }
    // Closed our pipe, so closed connection...
    if (websocket_debug)
-      fprintf(stderr, "Closed connection from %s\n", w->from);
+      fprintf (stderr, "Closed connection from %s\n", w->from);
    while (w->txq)
-      nextq();                  // free
+      nextq ();                 // free
    if (w->connected && !w->closed)
    {                            // close
       char end[2] = { 0x88, 0x00 };
       if (w->ss)
-         SSL_write(w->ss, end, 2);
+         SSL_write (w->ss, end, 2);
       else
-         send(w->socket, end, 2, 0);
+         send (w->socket, end, 2, 0);
    }
    if (w->ss)
-      SSL_shutdown(w->ss);
-   close(w->socket);
+      SSL_shutdown (w->ss);
+   close (w->socket);
    {
       // This is to make sure the pipe is closed and not just outgoing broken
       char poke;
-      while (read(w->pipe[0], &poke, sizeof(poke)) > 0);
+      while (read (w->pipe[0], &poke, sizeof (poke)) > 0);
    }
-   pthread_mutex_lock(&w->mutex);
+   pthread_mutex_lock (&w->mutex);
    if (w->ss)
    {
-      SSL_free(w->ss);
+      SSL_free (w->ss);
       w->ss = NULL;
    }
    w->socket = -1;
-   close(w->pipe[0]);
+   close (w->pipe[0]);
    w->pipe[0] = -1;
-   pthread_mutex_unlock(&w->mutex);
+   pthread_mutex_unlock (&w->mutex);
 #ifdef	USEAXL
    if (w->path && w->path->callbackxmlraw && w->connected)
    {
       if (websocket_debug)
-         fprintf(stderr, "%p Close callback\n", w);
-      w->path->callbackxmlraw(w, NULL, 0, NULL);        // Closed (we do not consider returned error)
+         fprintf (stderr, "%p Close callback\n", w);
+      w->path->callbackxmlraw (w, NULL, 0, NULL);       // Closed (we do not consider returned error)
    }
    if (w->path && w->path->callbackxml && w->connected)
    {
       if (websocket_debug)
-         fprintf(stderr, "%p Close callback\n", w);
-      w->path->callbackxml(w, NULL, NULL);      // Closed (we do not consider returned error)
+         fprintf (stderr, "%p Close callback\n", w);
+      w->path->callbackxml (w, NULL, NULL);     // Closed (we do not consider returned error)
    }
 #endif
 #ifdef	USEAJL
    if (w->path && w->path->callbackjsonraw && w->connected)
    {
       if (websocket_debug)
-         fprintf(stderr, "%p Close callback\n", w);
-      w->path->callbackjsonraw(w, NULL, 0, NULL);       // Closed (we do not consider returned error)
+         fprintf (stderr, "%p Close callback\n", w);
+      w->path->callbackjsonraw (w, NULL, 0, NULL);      // Closed (we do not consider returned error)
    }
    if (w->path && w->path->callbackjson && w->connected)
    {
       if (websocket_debug)
-         fprintf(stderr, "%p Close callback\n", w);
-      w->path->callbackjson(w, NULL, NULL);     // Closed (we do not consider returned error)
+         fprintf (stderr, "%p Close callback\n", w);
+      w->path->callbackjson (w, NULL, NULL);    // Closed (we do not consider returned error)
    }
 #endif
-   free(w->from);
+   free (w->from);
    // Free web socket
-   pthread_mutex_lock(&w->bind->mutex);
+   pthread_mutex_lock (&w->bind->mutex);
    websocket_t **ww;
    for (ww = (websocket_t **) & w->bind->sessions; *ww && *ww != w; ww = (websocket_t **) & (*ww)->next);
    *ww = (websocket_t *) w->next;
-   pthread_mutex_unlock(&w->bind->mutex);
-   free(w);
-   pthread_exit(NULL);
+   pthread_mutex_unlock (&w->bind->mutex);
+   free (w);
+   pthread_exit (NULL);
    return NULL;
 }
 
-char *websocket_do_rx(websocket_t * w)
+char *
+websocket_do_rx (websocket_t * w)
 {                               // Rx thread
    if (w->bind->keyfile)
    {                            // SSL set up
-      w->ss = SSL_new(w->bind->ctx);
+      w->ss = SSL_new (w->bind->ctx);
       if (!w->ss)
          return "Cannot create SSL server structure";
-      if (!SSL_set_fd(w->ss, w->socket))
+      if (!SSL_set_fd (w->ss, w->socket))
          return "Could not set client SSL fd";
       if (w->bind->certfile)
       {
-         int e = SSL_CTX_use_certificate_chain_file(w->bind->ctx, w->bind->certfile);
+         int e = SSL_CTX_use_certificate_chain_file (w->bind->ctx, w->bind->certfile);
          if (e != 1)
             return "Cannot load cert file";
       }
       if (w->bind->keyfile)
       {
-         int e = SSL_CTX_use_PrivateKey_file(w->bind->ctx, w->bind->keyfile, SSL_FILETYPE_PEM);
+         int e = SSL_CTX_use_PrivateKey_file (w->bind->ctx, w->bind->keyfile, SSL_FILETYPE_PEM);
          if (e != 1)
             return "Cannot load key file";
       }
-      int r = SSL_accept(w->ss);
+      int r = SSL_accept (w->ss);
       if (r != 1)
          return "Could not establish SSL client connection";
    }
@@ -464,44 +481,46 @@ char *websocket_do_rx(websocket_t * w)
       unsigned int ep = 0;
       while (1)
       {
-         if (!w->ss || !SSL_peek(w->ss, &(char)
-                                 { 0 }, 1))
+         if (!w->ss || !SSL_peek (w->ss, &(char)
+                                  { 0 }, 1))
          {
             struct pollfd p = { w->socket, POLLIN, 0 };
-            int s = poll(&p, 1, 10000);
+            int s = poll (&p, 1, 10000);
             if (s <= 0)
             {
                if (websocket_debug)
-                  fprintf(stderr, "Rx handshake [%.*s]\n", (int) w->rxptr, w->rxdata);
+                  fprintf (stderr, "Rx handshake [%.*s]\n", (int) w->rxptr, w->rxdata);
                return "Handshake timeout";
             }
          }
          if (w->rxlen - w->rxptr < 1000)
-            w->rxdata = realloc(w->rxdata, w->rxlen += 1000);
+            w->rxdata = realloc (w->rxdata, w->rxlen += 1000);
          ssize_t len = 0;
          if (w->ss)
-            len = SSL_read(w->ss, w->rxdata + w->rxptr, w->rxlen - w->rxptr - 1);
+            len = SSL_read (w->ss, w->rxdata + w->rxptr, w->rxlen - w->rxptr - 1);
          else
-            len = recv(w->socket, w->rxdata + w->rxptr, w->rxlen - w->rxptr - 1, 0);
+            len = recv (w->socket, w->rxdata + w->rxptr, w->rxlen - w->rxptr - 1, 0);
          if (len <= 0)
             return "Connection closed in handshake";
          w->rxptr += len;
          if (w->rxptr < 4)
             continue;
-         while (ep <= w->rxptr - 4 && (w->rxdata[ep + 0] != '\r' || w->rxdata[ep + 1] != '\n' || w->rxdata[ep + 2] != '\r' || w->rxdata[ep + 3] != '\n'))
+         while (ep <= w->rxptr - 4
+                && (w->rxdata[ep + 0] != '\r' || w->rxdata[ep + 1] != '\n' || w->rxdata[ep + 2] != '\r'
+                    || w->rxdata[ep + 3] != '\n'))
             ep++;
          if (ep <= w->rxptr - 4)
             break;
       }
       if (websocket_debug)
-         fprintf(stderr, "Rx handshake [%.*s]\n", (int) ep, w->rxdata);
+         fprintf (stderr, "Rx handshake [%.*s]\n", (int) ep, w->rxdata);
       // Process headers
       unsigned char *e = w->rxdata + ep + 2;
       ep += 4;
       // The command (GET/POST/etc)
       unsigned char *p;
-      for (p = w->rxdata; p < e && isalpha(*p); p++)
-         *p = tolower(*p);
+      for (p = w->rxdata; p < e && isalpha (*p); p++)
+         *p = tolower (*p);
       if (p >= e || *p != ' ')
          return "Bad request";
       while (p < e && *p == ' ')
@@ -518,11 +537,11 @@ char *websocket_do_rx(websocket_t * w)
       if (eol < e && *eol == '\n')
          *eol++ = 0;
 #ifdef	USEAXL
-      xml_t xhead = xml_tree_new((char *) w->rxdata);
+      xml_t xhead = xml_tree_new ((char *) w->rxdata);
 #endif
 #ifdef	USEAJL
-      j_t jhead = j_create();
-      j_store_string(jhead, "method", (char *) w->rxdata);
+      j_t jhead = j_create ();
+      j_store_string (jhead, "method", (char *) w->rxdata);
 #endif
 
       char *url = (char *) p;
@@ -533,15 +552,15 @@ char *websocket_do_rx(websocket_t * w)
          *query++ = 0;
 #ifdef	USEAXL
          xml_t xq = xhead;
-         xq = xml_add(xhead, "query", query);   // New format creates query as sub object of head
+         xq = xml_add (xhead, "query", query);  // New format creates query as sub object of head
 #endif
 #ifdef	USEAJL
-         j_t jq = j_store_object(jhead, "query");
+         j_t jq = j_store_object (jhead, "query");
 #endif
          while (*query)
          {                      // URL decode
             char *p = query,
-                *v = NULL;
+               *v = NULL;
             while (*p && *p != '=' && *p != '&')
                p++;
             if (*p == '=')
@@ -555,9 +574,9 @@ char *websocket_do_rx(websocket_t * w)
                   {
                      *o++ = ' ';
                      p++;
-                  } else if (*p == '%' && isxdigit(p[1]) && isxdigit(p[2]))
+                  } else if (*p == '%' && isxdigit (p[1]) && isxdigit (p[2]))
                   {
-                     *o++ = (((p[1] & 0xF) + (isalpha(p[1]) ? 9 : 0)) << 4) + ((p[2] & 0xF) + (isalpha(p[2]) ? 9 : 0));
+                     *o++ = (((p[1] & 0xF) + (isalpha (p[1]) ? 9 : 0)) << 4) + ((p[2] & 0xF) + (isalpha (p[2]) ? 9 : 0));
                      p += 3;
                   } else
                      *o++ = *p++;
@@ -568,12 +587,12 @@ char *websocket_do_rx(websocket_t * w)
             if (*p == '&')
                *p++ = 0;
 #ifdef	USEAXL
-            xml_attribute_t a = xml_attribute_set(xq, query, v ? : "null");
+            xml_attribute_t a = xml_attribute_set (xq, query, v ? : "null");
             if (a && !v)
                a->json_unquoted = 1;
 #endif
 #ifdef	USEAJL
-            j_store_string(jq, query, v);
+            j_store_string (jq, query, v);
 #endif
 
             query = p;
@@ -581,12 +600,12 @@ char *websocket_do_rx(websocket_t * w)
       }
 #ifdef	USEAXL
       xml_t xhttp = xhead;
-      xhttp = xml_element_add(xhead, "http");   // Sub object if using raw logic
-      xml_element_set_content(xhttp, (char *) p);       // The URL
+      xhttp = xml_element_add (xhead, "http");  // Sub object if using raw logic
+      xml_element_set_content (xhttp, (char *) p);      // The URL
 #endif
 #ifdef	USEAJL
-      j_t jhttp = j_store_object(jhead, "http");
-      j_store_string(jhttp, "url", (char *) p);
+      j_t jhttp = j_store_object (jhead, "http");
+      j_store_string (jhttp, "url", (char *) p);
 #endif
       p = eol;                  // Start of headers
       char *session = NULL;
@@ -610,15 +629,15 @@ char *websocket_do_rx(websocket_t * w)
          if (eol < e && *eol == '\n')
             *eol++ = 0;
          unsigned char *eoh = p;
-         for (; eoh < e && (isalnum(*eoh) || *eoh == '-'); eoh++)
-            *eoh = tolower(*eoh);
+         for (; eoh < e && (isalnum (*eoh) || *eoh == '-'); eoh++)
+            *eoh = tolower (*eoh);
          while (p < eol && *eoh == ' ')
             *eoh++ = 0;
          if (*eoh == ':')
             *eoh++ = 0;
          while (eoh < eol && *eoh == ' ')
             *eoh++ = 0;
-         if (!strcmp((char *) p, "authorization") && !strncasecmp((char *) eoh, "Basic ", 6))
+         if (!strcmp ((char *) p, "authorization") && !strncasecmp ((char *) eoh, "Basic ", 6))
          {
             eoh += 6;
             while (*eoh == ' ')
@@ -626,62 +645,62 @@ char *websocket_do_rx(websocket_t * w)
             unsigned char *data = NULL;
 #ifdef	USEAXL
             {
-               int l = xml_base64d((char *) eoh, &data);
+               int l = xml_base64d ((char *) eoh, &data);
                if (data)
                {
-                  data = realloc(data, l + 1);
+                  data = realloc (data, l + 1);
                   data[l] = 0;
-                  xml_attribute_set(xhttp, (char *) p, (char *) data);
-                  free(data);
+                  xml_attribute_set (xhttp, (char *) p, (char *) data);
+                  free (data);
                }
             }
 #endif
 #ifdef	USEAJL
             {
-               int l = j_base64d((char *) eoh, &data);
+               int l = j_base64d ((char *) eoh, &data);
                if (data)
                {
-                  j_store_stringn(jhttp, (char *) p, (char *) data, l);
-                  free(data);
+                  j_store_stringn (jhttp, (char *) p, (char *) data, l);
+                  free (data);
                }
             }
 #endif
          } else
          {
 #ifdef	USEAXL
-            xml_attribute_set(xhttp, (char *) p, (char *) eoh);
+            xml_attribute_set (xhttp, (char *) p, (char *) eoh);
 #endif
 #ifdef	USEAJL
-            j_store_string(jhttp, (char *) p, (char *) eoh);
+            j_store_string (jhttp, (char *) p, (char *) eoh);
 #endif
          }
-         if (!strcmp((char *) p, "cookie"))
+         if (!strcmp ((char *) p, "cookie"))
          {                      // Scan for our session cookie
             char *data = (char *) eoh;
-            int l = strlen(wscookie);
+            int l = strlen (wscookie);
             while (*data)
             {
-               while (*data && isspace(*data))
+               while (*data && isspace (*data))
                   data++;
-               if (!strncmp(data, wscookie, l) && !isalnum(data[l]))
+               if (!strncmp (data, wscookie, l) && !isalnum (data[l]))
                {                // Looks like our cookie
                   data += l;
-                  while (*data && isspace(*data))
+                  while (*data && isspace (*data))
                      data++;
                   if (*data == '=')
                   {
                      data++;
-                     while (*data && isspace(*data))
+                     while (*data && isspace (*data))
                         data++;
                      char *e = data;
                      while (*e && *e != ';')
                         e++;
-                     while (e > data && isspace(e[-1]))
+                     while (e > data && isspace (e[-1]))
                         e--;
-                     session = malloc(e + 1 - data);
+                     session = malloc (e + 1 - data);
                      if (!session)
-                        errx(1, "malloc");
-                     memcpy(session, data, e - data);
+                        errx (1, "malloc");
+                     memcpy (session, data, e - data);
                      session[e - data] = 0;
                   }
                   break;
@@ -698,94 +717,97 @@ char *websocket_do_rx(websocket_t * w)
       }
       if (!session)
       {                         // Make a session id
-         session = malloc(65);
+         session = malloc (65);
          if (!session)
-            errx(1, "malloc");
-         int r = open("/dev/urandom", O_RDONLY);
+            errx (1, "malloc");
+         int r = open ("/dev/urandom", O_RDONLY);
          if (r < 0)
-            err(1, "Random");
-         if (read(r, session, 64) != 64)
-            err(1, "Random");
+            err (1, "Random");
+         if (read (r, session, 64) != 64)
+            err (1, "Random");
          int p;
          for (p = 0; p < 64; p++)
             session[p] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"[session[p] & 31];
          session[p] = 0;
-         close(r);
+         close (r);
       }
       const char *host = NULL,
-          *origin = NULL;
+         *origin = NULL;
 #ifdef	USEAXL
-      xml_add(xhead, "@session", session);
-      host = xml_get(xhttp, "@host");
-      origin = xml_get(xhttp, "@origin");
-      xml_attribute_set(xhead, "IP", w->from);
+      xml_add (xhead, "@session", session);
+      host = xml_get (xhttp, "@host");
+      origin = xml_get (xhttp, "@origin");
+      xml_attribute_set (xhead, "IP", w->from);
 #endif
 #ifdef	USEAJL
-      j_store_string(jhead, "session", session);
-      host = j_get(jhttp, "host");
-      origin = j_get(jhttp, "origin");
-      j_store_string(jhead, "IP", w->from);
+      j_store_string (jhead, "session", session);
+      host = j_get (jhttp, "host");
+      origin = j_get (jhttp, "origin");
+      j_store_string (jhead, "IP", w->from);
 #endif
-      int mismatch(const char *ref, const char *val) {
+      int mismatch (const char *ref, const char *val)
+      {
          if (!ref)
             return 0;           // OK
          if (!val)
             return 1;           // Bad
-         return strcmp(ref, val);       // comp
+         return strcmp (ref, val);      // comp
       }
       websocket_path_t *path;
-      for (path = w->bind->paths; path && (mismatch(path->origin, origin) || mismatch(path->host, host) || mismatch(path->path, url)); path = path->next);
+      for (path = w->bind->paths;
+           path && (mismatch (path->origin, origin) || mismatch (path->host, host) || mismatch (path->path, url));
+           path = path->next);
       if (!path)
       {
 #ifdef	USEAXL
          if (xhead)
-            xml_tree_delete(xhead);
+            xml_tree_delete (xhead);
 #endif
 #ifdef	USEAJL
-         j_delete(&jhead);
+         j_delete (&jhead);
 #endif
-         free(session);
+         free (session);
          return "Path not found";
       }
       w->path = path;
       char *er = NULL;
       const char *v = NULL;
 #ifdef	USEAXL
-      v = xml_get(xhttp, "@upgrade");
+      v = xml_get (xhttp, "@upgrade");
 #endif
 #ifdef	USEAJL
-      v = j_get(jhttp, "upgrade");
+      v = j_get (jhttp, "upgrade");
 #endif
       const char *method = NULL;
 #ifdef	USEAXL
-      method = xml_element_name(xhead);
+      method = xml_element_name (xhead);
 #endif
 #ifdef	USEAJL
-      method = j_get(jhead, "method");
+      method = j_get (jhead, "method");
 #endif
       if (!method)
          return "No method";
       if (!v)
       {                         // HTTP
          const char *cl = NULL,
-             *expect = NULL;
+            *expect = NULL;
 #ifdef	USEAXL
-         cl = xml_get(xhttp, "@content-length");
-         expect = xml_get(xhttp, "@expect");
+         cl = xml_get (xhttp, "@content-length");
+         expect = xml_get (xhttp, "@expect");
 #endif
 #ifdef	USEAJL
-         cl = j_get(jhttp, "content-length");
-         expect = j_get(jhttp, "expect");
+         cl = j_get (jhttp, "content-length");
+         expect = j_get (jhttp, "expect");
 #endif
-         if (!strcasecmp(method, "post") || expect || cl)
+         if (!strcasecmp (method, "post") || expect || cl)
          {                      // data to receive
             if (ep < w->rxptr)
             {
-               memmove(w->rxdata, w->rxdata + ep, w->rxptr - ep);
+               memmove (w->rxdata, w->rxdata + ep, w->rxptr - ep);
                w->rxptr -= ep;
             } else
             {
-               free(w->rxdata);
+               free (w->rxdata);
                w->rxdata = NULL;
                w->rxptr = 0;
                w->rxlen = 0;
@@ -793,18 +815,18 @@ char *websocket_do_rx(websocket_t * w)
             size_t max = 0;
             if (cl)
             {
-               max = strtoull(cl, NULL, 10);
-               w->rxdata = realloc(w->rxdata, w->rxlen = max + 1);
+               max = strtoull (cl, NULL, 10);
+               w->rxdata = realloc (w->rxdata, w->rxlen = max + 1);
                if (!w->rxdata)
                   er = "Malloc fail";
             }
-            if (expect && !strncmp(expect, "100", 3))
+            if (expect && !strncmp (expect, "100", 3))
             {
                char *reply = "HTTP/1.1 100 Continue\r\n\r\n";
                if (w->ss)
-                  SSL_write(w->ss, reply, strlen(reply));
+                  SSL_write (w->ss, reply, strlen (reply));
                else
-                  send(w->socket, reply, strlen(reply), 0);
+                  send (w->socket, reply, strlen (reply), 0);
             }
             if (!er)
             {
@@ -813,12 +835,12 @@ char *websocket_do_rx(websocket_t * w)
                   if (max && w->rxptr == max)
                      break;
                   if (!max && w->rxlen - w->rxptr < 1000)
-                     w->rxdata = realloc(w->rxdata, w->rxlen += 1000);
+                     w->rxdata = realloc (w->rxdata, w->rxlen += 1000);
                   ssize_t len = 0;
                   if (w->ss)
-                     len = SSL_read(w->ss, w->rxdata + w->rxptr, w->rxlen - w->rxptr - 1);
+                     len = SSL_read (w->ss, w->rxdata + w->rxptr, w->rxlen - w->rxptr - 1);
                   else
-                     len = recv(w->socket, w->rxdata + w->rxptr, w->rxlen - w->rxptr - 1, 0);
+                     len = recv (w->socket, w->rxdata + w->rxptr, w->rxlen - w->rxptr - 1, 0);
                   if (!len)
                      break;     // End of input
                   if (len < 0)
@@ -830,22 +852,22 @@ char *websocket_do_rx(websocket_t * w)
                }
                w->rxdata[w->rxptr] = 0;
                if (websocket_debug)
-                  fprintf(stderr, "Parse [%s]\n", (char *) w->rxdata);
+                  fprintf (stderr, "Parse [%s]\n", (char *) w->rxdata);
 #ifdef	USEAXL
                if (w->path && w->path->callbackxmlraw)
                {                // Raw data callback
                   if (websocket_debug)
-                     fprintf(stderr, "%p Post callback\n", w);
-                  er = w->path->callbackxmlraw(NULL, xhead, w->rxptr, w->rxdata);
+                     fprintf (stderr, "%p Post callback\n", w);
+                  er = w->path->callbackxmlraw (NULL, xhead, w->rxptr, w->rxdata);
                   xhead = NULL; // assumed to consume head/data
                   w->rxdata = NULL;     // consumed
                   w->rxptr = 0;
                } else if (w->path && w->path->callbackxml)
                {                // Note can call a post with null if nothing posted
-                  xml_t data = xml_tree_parse_json((char *) w->rxdata, "json");
+                  xml_t data = xml_tree_parse_json ((char *) w->rxdata, "json");
                   if (websocket_debug)
-                     fprintf(stderr, "%p Post callback\n", w);
-                  er = w->path->callbackxml(NULL, xhead, data);
+                     fprintf (stderr, "%p Post callback\n", w);
+                  er = w->path->callbackxml (NULL, xhead, data);
                   xhead = NULL; // assumed to consume head/data
                }
 #endif
@@ -853,19 +875,19 @@ char *websocket_do_rx(websocket_t * w)
                if (w->path && w->path->callbackjsonraw)
                {                // Raw data callback
                   if (websocket_debug)
-                     fprintf(stderr, "%p Post callback\n", w);
-                  er = w->path->callbackjsonraw(NULL, jhead, w->rxptr, w->rxdata);
+                     fprintf (stderr, "%p Post callback\n", w);
+                  er = w->path->callbackjsonraw (NULL, jhead, w->rxptr, w->rxdata);
                   jhead = NULL; // assumed consumed
                   w->rxdata = NULL;     // consumed
                   w->rxptr = 0;
                } else if (w->path && w->path->callbackjson)
                {                // Note can call a post with null if nothing posted
-                  j_t data = j_create();
-                  if (j_read_mem(data, (char *) w->rxdata, w->rxptr))
-                     j_delete(&data);
+                  j_t data = j_create ();
+                  if (j_read_mem (data, (char *) w->rxdata, w->rxptr))
+                     j_delete (&data);
                   if (websocket_debug)
-                     fprintf(stderr, "%p Post callback\n", w);
-                  er = w->path->callbackjson(NULL, jhead, data);
+                     fprintf (stderr, "%p Post callback\n", w);
+                  er = w->path->callbackjson (NULL, jhead, data);
                   jhead = NULL; // assumed consumed
                }
 #endif
@@ -876,14 +898,14 @@ char *websocket_do_rx(websocket_t * w)
             if (w->path && w->path->callbackxmlraw)
             {
                if (websocket_debug)
-                  fprintf(stderr, "%p Get callback\n", w);
-               er = w->path->callbackxmlraw(NULL, xhead, 0, NULL);
+                  fprintf (stderr, "%p Get callback\n", w);
+               er = w->path->callbackxmlraw (NULL, xhead, 0, NULL);
                xhead = NULL;
             } else if (w->path && w->path->callbackxml)
             {
                if (websocket_debug)
-                  fprintf(stderr, "%p Get callback\n", w);
-               er = w->path->callbackxml(NULL, xhead, NULL);
+                  fprintf (stderr, "%p Get callback\n", w);
+               er = w->path->callbackxml (NULL, xhead, NULL);
                xhead = NULL;
             }
 #endif
@@ -891,14 +913,14 @@ char *websocket_do_rx(websocket_t * w)
             if (w->path && w->path->callbackjsonraw)
             {
                if (websocket_debug)
-                  fprintf(stderr, "%p Get callback\n", w);
-               er = w->path->callbackjsonraw(NULL, jhead, 0, NULL);
+                  fprintf (stderr, "%p Get callback\n", w);
+               er = w->path->callbackjsonraw (NULL, jhead, 0, NULL);
                jhead = NULL;    // assumed consumed
             } else if (w->path && w->path->callbackjson)
             {
                if (websocket_debug)
-                  fprintf(stderr, "%p Get callback\n", w);
-               er = w->path->callbackjson(NULL, jhead, NULL);
+                  fprintf (stderr, "%p Get callback\n", w);
+               er = w->path->callbackjson (NULL, jhead, NULL);
                jhead = NULL;    // assumed consumed
             }
 #endif
@@ -907,57 +929,57 @@ char *websocket_do_rx(websocket_t * w)
             er = "204 No content";
       } else
       {                         // Web socket
-         host = strdupa(host);  // We free before using it otherwise
+         host = strdupa (host); // We free before using it otherwise
          {                      // Strip port
-            char *p = strrchr(host, ':');
+            char *p = strrchr (host, ':');
             if (p)
                *p = 0;
          }
          unsigned char hash[SHA_DIGEST_LENGTH] = { };
-         if (strcasecmp(method, "get"))
+         if (strcasecmp (method, "get"))
             er = "Bad request (not GET)";
-         if (strcasecmp(v, "websocket"))
+         if (strcasecmp (v, "websocket"))
             er = "Bad upgrade header (not websocket)";
          v = NULL;
 #ifdef	USEAXL
-         v = xml_get(xhttp, "@sec-websocket-version");
+         v = xml_get (xhttp, "@sec-websocket-version");
 #endif
 #ifdef	USEAJL
-         v = j_get(jhttp, "sec-websocket-version");
+         v = j_get (jhttp, "sec-websocket-version");
 #endif
          if (!v)
             er = "No version";
-         else if (atoi(v) != 13)
+         else if (atoi (v) != 13)
             er = "Bad version (not 13)";
          v = NULL;
 #ifdef	USEAXL
-         v = xml_get(xhttp, "@sec-websocket-key");
+         v = xml_get (xhttp, "@sec-websocket-key");
 #endif
 #ifdef	USEAJL
-         v = j_get(jhttp, "sec-websocket-key");
+         v = j_get (jhttp, "sec-websocket-key");
 #endif
          if (!v)
             er = "No websocket key";
          else
          {
             SHA_CTX c;
-            SHA1_Init(&c);
-            SHA1_Update(&c, v, strlen(v));
-            SHA1_Update(&c, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11", 36);
-            SHA1_Final(hash, &c);
+            SHA1_Init (&c);
+            SHA1_Update (&c, v, strlen (v));
+            SHA1_Update (&c, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11", 36);
+            SHA1_Final (hash, &c);
          }
 #ifdef	USEAXL
          if (!er && w->path->callbackxmlraw)
          {
             if (websocket_debug)
-               fprintf(stderr, "%p Connect callback\n", w);
-            er = w->path->callbackxmlraw(w, xhead, 0, NULL);
+               fprintf (stderr, "%p Connect callback\n", w);
+            er = w->path->callbackxmlraw (w, xhead, 0, NULL);
             xhead = NULL;
          } else if (!er && w->path->callbackxml)
          {
             if (websocket_debug)
-               fprintf(stderr, "%p Connect callback\n", w);
-            er = w->path->callbackxml(w, xhead, NULL);
+               fprintf (stderr, "%p Connect callback\n", w);
+            er = w->path->callbackxml (w, xhead, NULL);
             xhead = NULL;
          }
 #endif
@@ -965,77 +987,77 @@ char *websocket_do_rx(websocket_t * w)
          if (!er && w->path->callbackjsonraw)
          {
             if (websocket_debug)
-               fprintf(stderr, "%p Connect callback\n", w);
-            er = w->path->callbackjsonraw(w, jhead, 0, NULL);
+               fprintf (stderr, "%p Connect callback\n", w);
+            er = w->path->callbackjsonraw (w, jhead, 0, NULL);
             jhead = NULL;       // assumed consumed
          } else if (!er && w->path->callbackjson)
          {
             if (websocket_debug)
-               fprintf(stderr, "%p Connect callback\n", w);
-            er = w->path->callbackjson(w, jhead, NULL);
+               fprintf (stderr, "%p Connect callback\n", w);
+            er = w->path->callbackjson (w, jhead, NULL);
             jhead = NULL;       // assumed consumed
          }
 #endif
          if (!er)
          {                      // Response...
-            txb_t *txb = malloc(sizeof(*txb));
-            memset(txb, 0, sizeof(*txb));
-            pthread_mutex_init(&txb->mutex, NULL);
+            txb_t *txb = malloc (sizeof (*txb));
+            memset (txb, 0, sizeof (*txb));
+            pthread_mutex_init (&txb->mutex, NULL);
             txb->count = 1;
-            txb->len = asprintf((char **) &txb->buf,    //
-                                "HTTP/1.1 101 Switching Protocols\r\n"  //
-                                "Upgrade: websocket\r\n"        //
-                                "Connection: Upgrade\r\n"       //
-                                "Set-Cookie: %s=%s; Path=%s; Domain=%s%s\r\n"   //
-                                "Sec-WebSocket-Accept: %s\r\n"  //
-                                "\r\n", //
-                                wscookie, session, path->path ? : url, host, w->ss ? "; Secure" : "",
+            txb->len = asprintf ((char **) &txb->buf,   //
+                                 "HTTP/1.1 101 Switching Protocols\r\n" //
+                                 "Upgrade: websocket\r\n"       //
+                                 "Connection: Upgrade\r\n"      //
+                                 "Set-Cookie: %s=%s; Path=%s; Domain=%s%s\r\n"  //
+                                 "Sec-WebSocket-Accept: %s\r\n" //
+                                 "\r\n",        //
+                                 wscookie, session, path->path ? : url, host, w->ss ? "; Secure" : "",
 #ifdef	USEAXL
-                                xml_base64(SHA_DIGEST_LENGTH, hash)
+                                 xml_base64 (SHA_DIGEST_LENGTH, hash)
 #else
 #ifdef	USEAJL
-                                j_base64(SHA_DIGEST_LENGTH, hash)
+                                 j_base64 (SHA_DIGEST_LENGTH, hash)
 #else
-                                NULL
+                                 NULL
 #endif
 #endif
-                );
+               );
             if (txb->len <= 0)
                er = "Bad asprintf";
             else
             {                   // Switch protocols message to front of queue
                // Like txb_queue, but at start of queue
-               txq_t *txq = malloc(sizeof(*txq));
-               memset(txq, 0, sizeof(*txq));
+               txq_t *txq = malloc (sizeof (*txq));
+               memset (txq, 0, sizeof (*txq));
                txq->data = txb;
-               pthread_mutex_lock(&txb->mutex);
+               pthread_mutex_lock (&txb->mutex);
                txb->count++;
-               pthread_mutex_unlock(&txb->mutex);
-               pthread_mutex_lock(&w->mutex);
+               pthread_mutex_unlock (&txb->mutex);
+               pthread_mutex_lock (&w->mutex);
                if (w->txq)
                   txq->next = w->txq;
                else
                   w->txe = txq;
                w->txq = txq;
                w->connected = 1;        // Allows tx to start
-               pthread_mutex_unlock(&w->mutex);
+               pthread_mutex_unlock (&w->mutex);
                char poke = 0;
-               pthread_mutex_lock(&w->mutex);
+               pthread_mutex_lock (&w->mutex);
                if (w->pipe[1] >= 0)
-                  safe_write(w->pipe[1], &poke, sizeof(poke));
-               pthread_mutex_unlock(&w->mutex);
-               txb_done(txb);
+                  safe_write (w->pipe[1], &poke, sizeof (poke));
+               pthread_mutex_unlock (&w->mutex);
+               txb_done (txb);
             }
          }
       }
 #ifdef	USEAXL
       if (xhead)
-         xml_tree_delete(xhead);
+         xml_tree_delete (xhead);
 #endif
 #ifdef	USEAJL
-      j_delete(&jhead);
+      j_delete (&jhead);
 #endif
-      free(session);
+      free (session);
       if (er)
          return er;             // Error
    }
@@ -1043,21 +1065,21 @@ char *websocket_do_rx(websocket_t * w)
    w->rxptr = 0;                // next packet
    w->rxlen = 0;
    if (w->rxdata)
-      free(w->rxdata);
+      free (w->rxdata);
    w->rxdata = NULL;
    {                            // Rx websocket packets
       while (1)
       {
          unsigned char head[14],
-          hptr = 0,
-             hlen = 2;
+           hptr = 0,
+            hlen = 2;
          ssize_t len = 0;
          while (hptr < hlen)
          {
             if (w->ss)
-               len = SSL_read(w->ss, head + hptr, hlen - hptr);
+               len = SSL_read (w->ss, head + hptr, hlen - hptr);
             else
-               len = recv(w->socket, head + hptr, hlen - hptr, 0);
+               len = recv (w->socket, head + hptr, hlen - hptr, 0);
             if (len <= 0)
                return NULL;     // closed
             hptr += len;
@@ -1074,24 +1096,26 @@ char *websocket_do_rx(websocket_t * w)
          }
          if (websocket_debug)
          {
-            fprintf(stderr, "Rx Header");
+            fprintf (stderr, "Rx Header");
             for (hptr = 0; hptr < hlen; hptr++)
-               fprintf(stderr, " %02X", head[hptr]);
-            fprintf(stderr, "\n");
+               fprintf (stderr, " %02X", head[hptr]);
+            fprintf (stderr, "\n");
          }
          len = (head[1] & 0x7F);
          if (len == 126)
             len = (head[2] << 8) + (head[3]);
          else if (len == 127)
             len =
-                ((unsigned long long) head[2] << 56) + ((unsigned long long) head[3] << 48) + ((unsigned long long) head[4] << 40) + ((unsigned long long) head[5] << 32) + ((unsigned long long) head[6] << 24) + ((unsigned long long) head[7] << 16) + ((unsigned long long) head[8] << 8) + ((unsigned long long) head[9]);
-         w->rxdata = realloc(w->rxdata, (w->rxlen += len) + 1);
+               ((unsigned long long) head[2] << 56) + ((unsigned long long) head[3] << 48) + ((unsigned long long) head[4] << 40) +
+               ((unsigned long long) head[5] << 32) + ((unsigned long long) head[6] << 24) + ((unsigned long long) head[7] << 16) +
+               ((unsigned long long) head[8] << 8) + ((unsigned long long) head[9]);
+         w->rxdata = realloc (w->rxdata, (w->rxlen += len) + 1);
          while (w->rxptr < w->rxlen)
          {
             if (w->ss)
-               len = SSL_read(w->ss, w->rxdata + w->rxptr, w->rxlen - w->rxptr);
+               len = SSL_read (w->ss, w->rxdata + w->rxptr, w->rxlen - w->rxptr);
             else
-               len = recv(w->socket, w->rxdata + w->rxptr, w->rxlen - w->rxptr, 0);
+               len = recv (w->socket, w->rxdata + w->rxptr, w->rxlen - w->rxptr, 0);
             if (len <= 0)
                return NULL;     // closed
             size_t p = w->rxptr;
@@ -1113,16 +1137,16 @@ char *websocket_do_rx(websocket_t * w)
                return "Unmasked data";
             if (websocket_debug)
             {
-               fprintf(stderr, "Rx");
+               fprintf (stderr, "Rx");
                if ((head[0] & 0x0F) == 1)
-                  fprintf(stderr, " [%.*s]", (int) w->rxlen, w->rxdata);        // Text frame
+                  fprintf (stderr, " [%.*s]", (int) w->rxlen, w->rxdata);       // Text frame
                else
                {
                   unsigned int p;
                   for (p = 0; p < w->rxlen; p++)
-                     fprintf(stderr, " %02X", w->rxdata[p]);    // Binary data
+                     fprintf (stderr, " %02X", w->rxdata[p]);   // Binary data
                }
-               fprintf(stderr, "\n");
+               fprintf (stderr, "\n");
             }
             w->rxdata[w->rxlen] = 0;    // Always add a NULL for safety
             if ((head[0] & 0xF) == 1 || (head[0] & 0xF) == 2)
@@ -1131,20 +1155,20 @@ char *websocket_do_rx(websocket_t * w)
                if (w->path && w->path->callbackxmlraw)
                {                // Raw callback
                   if (websocket_debug)
-                     fprintf(stderr, "%p Data callback\n", w);
-                  char *e = w->path->callbackxmlraw(w, NULL, w->rxptr, w->rxdata);
+                     fprintf (stderr, "%p Data callback\n", w);
+                  char *e = w->path->callbackxmlraw (w, NULL, w->rxptr, w->rxdata);
                   w->rxdata = NULL;     // Consumed
                   w->rxptr = 0;
                   if (e)
                      return e;  // bad
                } else if (w->path && w->path->callbackxml)
                {                // JSON callback
-                  xml_t xml = xml_tree_parse_json((char *) w->rxdata, "json");
+                  xml_t xml = xml_tree_parse_json ((char *) w->rxdata, "json");
                   if (!xml)
                      return "Bad XML";
                   if (websocket_debug)
-                     fprintf(stderr, "%p Data callback\n", w);
-                  char *e = w->path->callbackxml(w, NULL, xml); // XML is consumed
+                     fprintf (stderr, "%p Data callback\n", w);
+                  char *e = w->path->callbackxml (w, NULL, xml);        // XML is consumed
                   if (e)
                      return e;  // bad
                }
@@ -1153,24 +1177,24 @@ char *websocket_do_rx(websocket_t * w)
                if (w->path && w->path->callbackjsonraw)
                {                // Raw callback
                   if (websocket_debug)
-                     fprintf(stderr, "%p Data callback\n", w);
-                  char *e = w->path->callbackjsonraw(w, NULL, w->rxptr, w->rxdata);
+                     fprintf (stderr, "%p Data callback\n", w);
+                  char *e = w->path->callbackjsonraw (w, NULL, w->rxptr, w->rxdata);
                   w->rxdata = NULL;     // Consumed
                   w->rxptr = 0;
                   if (e)
                      return e;  // bad
                } else if (w->path && w->path->callbackjson)
                {                // JSON callback
-                  j_t json = j_create();
-		  char *e=j_read_mem(json, (char *) w->rxdata, -1);
+                  j_t json = j_create ();
+                  char *e = j_read_mem (json, (char *) w->rxdata, -1);
                   if (e)
                   {
-                     j_delete(&json);
-                     return e; // bad
+                     j_delete (&json);
+                     return e;  // bad
                   }
                   if (websocket_debug)
-                     fprintf(stderr, "%p Data callback\n", w);
-                  e = w->path->callbackjson(w, NULL, json);       // JSON is consumed
+                     fprintf (stderr, "%p Data callback\n", w);
+                  e = w->path->callbackjson (w, NULL, json);    // JSON is consumed
                   if (e)
                      return e;  // bad
                }
@@ -1187,44 +1211,44 @@ char *websocket_do_rx(websocket_t * w)
                   hlen -= 4;
                }
                // Again, not quote txb_queue as we have the data
-               txb_t *txb = malloc(sizeof(*txb));
-               memset(txb, 0, sizeof(*txb));
-               pthread_mutex_init(&txb->mutex, NULL);
+               txb_t *txb = malloc (sizeof (*txb));
+               memset (txb, 0, sizeof (*txb));
+               pthread_mutex_init (&txb->mutex, NULL);
                txb->count = 1;
                txb->len = w->rxlen;
                txb->buf = w->rxdata;
-               memmove(txb->head, head, txb->hlen = hlen);
+               memmove (txb->head, head, txb->hlen = hlen);
                w->rxdata = NULL;        // Used in this buffer
-               txq_t *txq = malloc(sizeof(*txq));
-               memset(txq, 0, sizeof(*txq));
+               txq_t *txq = malloc (sizeof (*txq));
+               memset (txq, 0, sizeof (*txq));
                txq->data = txb;
-               pthread_mutex_lock(&w->mutex);
+               pthread_mutex_lock (&w->mutex);
                if (w->txq)
                   w->txe->next = txq;
                else
                   w->txq = txq;
                w->txe = txq;
-               pthread_mutex_unlock(&w->mutex);
+               pthread_mutex_unlock (&w->mutex);
             } else if ((head[0] & 0xF) == 0xA)
             {                   // Pong
                struct timeval tv;
                struct timezone tz;
-               gettimeofday(&tv, &tz);
+               gettimeofday (&tv, &tz);
                unsigned long long pong = tv.tv_sec * 1000000ULL + tv.tv_usec;;
                unsigned long long ping = 0;
-               if (w->rxlen == sizeof(ping))
+               if (w->rxlen == sizeof (ping))
                {
-                  memcpy(&ping, w->rxdata, sizeof(ping));
+                  memcpy (&ping, w->rxdata, sizeof (ping));
                   w->ping = pong - ping;
                   if (websocket_debug)
-                     fprintf(stderr, "Pong %lluus\n", pong - ping);
+                     fprintf (stderr, "Pong %lluus\n", pong - ping);
                }
             }
             w->rxptr = 0;       // next packet
             w->rxlen = 0;
             if (w->rxdata)
             {
-               free(w->rxdata);
+               free (w->rxdata);
                w->rxdata = NULL;
             }
          }
@@ -1234,58 +1258,59 @@ char *websocket_do_rx(websocket_t * w)
    return NULL;
 }
 
-void *websocket_rx(void *p)
+void *
+websocket_rx (void *p)
 {                               // Rx thread
-   sigignore(SIGPIPE);
+   sigignore (SIGPIPE);
    websocket_t *w = p;
-   char *e = websocket_do_rx(w);
+   char *e = websocket_do_rx (w);
    if (e && websocket_debug)
-      fprintf(stderr, "Rx socket response: %s\n", e);
+      fprintf (stderr, "Rx socket response: %s\n", e);
    if (!w->connected)
    {                            // Error...
       char *res = NULL;
       size_t len = 0;
       if (*e == '@')
       {                         // Send a file!
-         FILE *o = open_memstream(&res, &len);
-         FILE *i = fopen(e + 1, "r");
+         FILE *o = open_memstream (&res, &len);
+         FILE *i = fopen (e + 1, "r");
          if (i)
          {
-            fprintf(o, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: ");
-            char *p = strrchr(e + 1, '.') ? : ".plain";
-            if (!strcasecmp(p, ".png"))
-               fprintf(o, "image/png");
-            else if (!strcasecmp(p, ".svg"))
-               fprintf(o, "image/svg+xml");
-            else if (!strcasecmp(p, ".js"))
-               fprintf(o, "text/javascript");
+            fprintf (o, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: ");
+            char *p = strrchr (e + 1, '.') ? : ".plain";
+            if (!strcasecmp (p, ".png"))
+               fprintf (o, "image/png");
+            else if (!strcasecmp (p, ".svg"))
+               fprintf (o, "image/svg+xml");
+            else if (!strcasecmp (p, ".js"))
+               fprintf (o, "text/javascript");
             else
-               fprintf(o, "text/%s", p + 1);
-            fprintf(o, "\r\n\r\n");
+               fprintf (o, "text/%s", p + 1);
+            fprintf (o, "\r\n\r\n");
             while (1)
             {
                char buf[10240];
-               size_t l = fread(buf, 1, sizeof(buf), i);
+               size_t l = fread (buf, 1, sizeof (buf), i);
                if (l <= 0)
                   break;
-               fwrite(buf, l, 1, o);
+               fwrite (buf, l, 1, o);
             }
-            fclose(i);
+            fclose (i);
          } else
-            fprintf(o, "HTTP/1.1 404 Not found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nNot found");
-         fclose(o);
+            fprintf (o, "HTTP/1.1 404 Not found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nNot found");
+         fclose (o);
       } else if (*e == '>')
-         len = asprintf(&res, "HTTP/1.1 302 Moved\r\nLocation: %s\r\nConnection: close\r\n\r\n", e + 1);        // Redirect
+         len = asprintf (&res, "HTTP/1.1 302 Moved\r\nLocation: %s\r\nConnection: close\r\n\r\n", e + 1);       // Redirect
       else if (*e == '*')
-         len = asprintf(&res, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n%s", e + 1);     // General data
-      else if (!strncmp(e, "204 ", 4))
-         len = asprintf(&res, "HTTP/1.1 %s\r\nConnection: close\r\n\r\n", e);   // No content
-      else if (!strncmp(e, "401 ", 4))
-         len = asprintf(&res, "HTTP/1.1 401 Unauthorised\r\nWWW-Authenticate: Basic realm=\"%s\"\r\nConnection: close\r\n\r\nLogin required", e + 4);   // No content
-      else if (isdigit(e[0]) && isdigit(e[1]) && isdigit(e[2]) && e[3] == ' ')  // Error message
-         len = asprintf(&res, "HTTP/1.1 %s\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n%s", e, e + 4);
+         len = asprintf (&res, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n%s", e + 1);    // General data
+      else if (!strncmp (e, "204 ", 4))
+         len = asprintf (&res, "HTTP/1.1 %s\r\nConnection: close\r\n\r\n", e);  // No content
+      else if (!strncmp (e, "401 ", 4))
+         len = asprintf (&res, "HTTP/1.1 401 Unauthorised\r\nWWW-Authenticate: Basic realm=\"%s\"\r\nConnection: close\r\n\r\nLogin required", e + 4);  // No content
+      else if (isdigit (e[0]) && isdigit (e[1]) && isdigit (e[2]) && e[3] == ' ')       // Error message
+         len = asprintf (&res, "HTTP/1.1 %s\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n%s", e, e + 4);
       else
-         len = asprintf(&res, "HTTP/1.1 500 %s\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n%s", e, e);      // General error
+         len = asprintf (&res, "HTTP/1.1 500 %s\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n%s", e, e);     // General error
       if (len > 0)
       {
          size_t ptr = 0;
@@ -1293,126 +1318,128 @@ void *websocket_rx(void *p)
          {
             size_t sent = 0;
             if (w->ss)
-               sent = SSL_write(w->ss, res + ptr, len - ptr);
+               sent = SSL_write (w->ss, res + ptr, len - ptr);
             else
-               sent = send(w->socket, res + ptr, len - ptr, 0);
+               sent = send (w->socket, res + ptr, len - ptr, 0);
             if (sent <= 0)
                break;
             ptr += sent;
          }
       }
-      free(res);
+      free (res);
    }
    if (e && (*e == '*' || *e == '@' || *e == '>'))
-      free(e);                  // Malloc'd
-   pthread_mutex_lock(&w->mutex);
+      free (e);                 // Malloc'd
+   pthread_mutex_lock (&w->mutex);
    if (w->pipe[1] >= 0)
-      close(w->pipe[1]);        // stop tx
+      close (w->pipe[1]);       // stop tx
    w->pipe[1] = -1;
-   pthread_mutex_unlock(&w->mutex);
+   pthread_mutex_unlock (&w->mutex);
    if (w->rxdata)
-      free(w->rxdata);
-   pthread_exit(NULL);
+      free (w->rxdata);
+   pthread_exit (NULL);
    return NULL;
 }
 
-void *websocket_listen(void *p)
+void *
+websocket_listen (void *p)
 {                               // Listen thread
-   sigignore(SIGPIPE);
+   sigignore (SIGPIPE);
    websocket_bind_t *b = p;
    while (1)
    {
       struct sockaddr_in6 addr = { 0 };
-      socklen_t len = sizeof(addr);
-      int s = accept(b->socket, (void *) &addr, &len);
+      socklen_t len = sizeof (addr);
+      int s = accept (b->socket, (void *) &addr, &len);
       if (s < 0)
       {
-         warn("Bad accept");
+         warn ("Bad accept");
          continue;
       }
       char from[INET6_ADDRSTRLEN + 1] = "";
       if (addr.sin6_family == AF_INET)
-         inet_ntop(addr.sin6_family, &((struct sockaddr_in *) &addr)->sin_addr, from, sizeof(from));
+         inet_ntop (addr.sin6_family, &((struct sockaddr_in *) &addr)->sin_addr, from, sizeof (from));
       else
-         inet_ntop(addr.sin6_family, &addr.sin6_addr, from, sizeof(from));
-      if (!strncmp(from, "::ffff:", 7) && strchr(from, '.'))
-         memmove(from, from + 7, strlen(from + 7) + 1);
+         inet_ntop (addr.sin6_family, &addr.sin6_addr, from, sizeof (from));
+      if (!strncmp (from, "::ffff:", 7) && strchr (from, '.'))
+         memmove (from, from + 7, strlen (from + 7) + 1);
       if (websocket_debug)
-         fprintf(stderr, "Accepted connection from %s\n", from);
-      websocket_t *w = malloc(sizeof(*w));
+         fprintf (stderr, "Accepted connection from %s\n", from);
+      websocket_t *w = malloc (sizeof (*w));
       if (!w)
       {
-         warnx("Malloc fail");
-         close(s);
+         warnx ("Malloc fail");
+         close (s);
          continue;
       }
-      memset(w, 0, sizeof(*w));
-      pthread_mutex_init(&w->mutex, NULL);
+      memset (w, 0, sizeof (*w));
+      pthread_mutex_init (&w->mutex, NULL);
       w->bind = b;
       w->socket = s;
-      w->from = strdup(from);
-      if (pipe((int *) w->pipe))
+      w->from = strdup (from);
+      if (pipe ((int *) w->pipe))
       {                         // Failed to make pipe even, that is bad
          if (websocket_debug)
-            fprintf(stderr, "Cannot make pipe\n");
-         free(w);
-         close(s);
+            fprintf (stderr, "Cannot make pipe\n");
+         free (w);
+         close (s);
          continue;
       }
       // Link in
-      pthread_mutex_lock(&b->mutex);
+      pthread_mutex_lock (&b->mutex);
       w->next = b->sessions;
       b->sessions = w;
-      pthread_mutex_unlock(&b->mutex);
+      pthread_mutex_unlock (&b->mutex);
       // Threads (tx cleans up, so started last)
       pthread_t t;
-      if (pthread_create(&t, NULL, websocket_rx, w))
+      if (pthread_create (&t, NULL, websocket_rx, w))
       {                         // No rx task, close things and free
          if (websocket_debug)
-            fprintf(stderr, "Cannot make rx thread\n");
-         pthread_mutex_lock(&w->mutex);
-         close(w->pipe[1]);     // Tells tx thread to give up and close/free
+            fprintf (stderr, "Cannot make rx thread\n");
+         pthread_mutex_lock (&w->mutex);
+         close (w->pipe[1]);    // Tells tx thread to give up and close/free
          w->pipe[1] = -1;
-         pthread_mutex_unlock(&w->mutex);
-         close(s);
+         pthread_mutex_unlock (&w->mutex);
+         close (s);
          continue;
       }
-      pthread_detach(t);
-      if (pthread_create(&t, NULL, websocket_tx, w))
+      pthread_detach (t);
+      if (pthread_create (&t, NULL, websocket_tx, w))
       {                         // Failed to make tx thread
          if (websocket_debug)
-            fprintf(stderr, "Cannot make tx thread\n");
-         pthread_mutex_lock(&w->mutex);
-         close(w->pipe[0]);
+            fprintf (stderr, "Cannot make tx thread\n");
+         pthread_mutex_lock (&w->mutex);
+         close (w->pipe[0]);
          w->pipe[0] = -1;
-         close(w->pipe[1]);
+         close (w->pipe[1]);
          w->pipe[1] = -1;
-         pthread_mutex_unlock(&w->mutex);
-         free(w);               // Problematic if rx task running.
+         pthread_mutex_unlock (&w->mutex);
+         free (w);              // Problematic if rx task running.
          continue;
       }
-      pthread_detach(t);
+      pthread_detach (t);
    }
    return NULL;
 }
 
-const char *websocket_bind_opts(websocket_bindopts_t o)
+const char *
+websocket_bind_opts (websocket_bindopts_t o)
 {
-   signal(SIGPIPE, SIG_IGN);
+   signal (SIGPIPE, SIG_IGN);
    if (!o.port)
       o.port = (o.keyfile ? "https" : "http");
    websocket_bind_t *b;
-   for (b = binds; b && strcmp(b->port, o.port); b = b->next);
+   for (b = binds; b && strcmp (b->port, o.port); b = b->next);
    if (!b)
    {
       if (!binds)
-         SSL_library_init();
+         SSL_library_init ();
       // bind
       int s = -1;
       {                         // bind
-         char *port = strdupa(o.port);
+         char *port = strdupa (o.port);
          char *host = NULL;
-         char *c = strrchr(port, '#');
+         char *c = strrchr (port, '#');
          if (c)
          {
             *c++ = 0;
@@ -1421,11 +1448,11 @@ const char *websocket_bind_opts(websocket_bindopts_t o)
             port = c;
          }
          if (websocket_debug)
-            fprintf(stderr, "Bind [%s] %s\n", host ? : "*", port);
+            fprintf (stderr, "Bind [%s] %s\n", host ? : "*", port);
        const struct addrinfo hints = { ai_flags: AI_PASSIVE, ai_socktype: SOCK_STREAM, ai_family:AF_UNSPEC };
          struct addrinfo *res = NULL,
-             *r;
-         if (getaddrinfo(host, port, &hints, &res))
+            *r;
+         if (getaddrinfo (host, port, &hints, &res))
             return "Failed to get address info";
          if (!res)
             return "Cannot find port";
@@ -1435,41 +1462,41 @@ const char *websocket_bind_opts(websocket_bindopts_t o)
             r = res;
          for (; r; r = r->ai_next)
          {
-            s = socket(r->ai_family, r->ai_socktype, r->ai_protocol);
+            s = socket (r->ai_family, r->ai_socktype, r->ai_protocol);
             if (s < 0)
             {
                err = "Cannot create socket";
                continue;
             }
             int on = 1;
-            if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)))
+            if (setsockopt (s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof (on)))
             {
-               close(s);
+               close (s);
                err = "Failed to set socket option (REUSE)";
                continue;
             }
             int max = MAXTCP;
-            if (setsockopt(s, SOL_SOCKET, SO_RCVBUF, &max, sizeof(max)))
+            if (setsockopt (s, SOL_SOCKET, SO_RCVBUF, &max, sizeof (max)))
             {
-               close(s);
+               close (s);
                err = "Failed to set socket option (RCV)";
                continue;
             }
-            if (setsockopt(s, SOL_SOCKET, SO_SNDBUF, &max, sizeof(max)))
+            if (setsockopt (s, SOL_SOCKET, SO_SNDBUF, &max, sizeof (max)))
             {
-               close(s);
+               close (s);
                err = "Failed to set socket option (SND)";
                continue;
             }
-            if (bind(s, r->ai_addr, r->ai_addrlen))
+            if (bind (s, r->ai_addr, r->ai_addrlen))
             {
-               close(s);
+               close (s);
                err = "Failed to bind to address";
                continue;
             }
-            if (listen(s, 10))
+            if (listen (s, 10))
             {
-               close(s);
+               close (s);
                err = "Could not listen on port";
                continue;
             }
@@ -1477,46 +1504,48 @@ const char *websocket_bind_opts(websocket_bindopts_t o)
             err = NULL;
             break;
          }
-         freeaddrinfo(res);
+         freeaddrinfo (res);
          if (err)
             return err;
       }
       // allocate
-      b = malloc(sizeof(*b));
-      memset(b, 0, sizeof(*b));
-      pthread_mutex_init(&b->mutex, NULL);
+      b = malloc (sizeof (*b));
+      memset (b, 0, sizeof (*b));
+      pthread_mutex_init (&b->mutex, NULL);
       if (o.certfile)
-         b->certfile = strdup(o.certfile);
+         b->certfile = strdup (o.certfile);
       if (o.keyfile)
-         b->keyfile = strdup(o.keyfile);
-      b->port = strdup(o.port);
+         b->keyfile = strdup (o.keyfile);
+      b->port = strdup (o.port);
       b->socket = s;
       if (o.keyfile)
       {
-         b->ctx = SSL_CTX_new(SSLv23_server_method());  // Negotiates TLS
+         b->ctx = SSL_CTX_new (SSLv23_server_method ());        // Negotiates TLS
          if (!b->ctx)
             return "Cannot create SSL CTX";
       }
       b->next = binds;
       binds = b;
       pthread_t t;
-      if (pthread_create(&t, NULL, websocket_listen, b))
+      if (pthread_create (&t, NULL, websocket_listen, b))
          return "Thread create error";
-      pthread_detach(t);
-   } else if (strcmp(b->certfile ? : "", o.certfile ? : "") || strcmp(b->keyfile ? : "", o.keyfile ? : ""))
+      pthread_detach (t);
+   } else if (strcmp (b->certfile ? : "", o.certfile ? : "") || strcmp (b->keyfile ? : "", o.keyfile ? : ""))
       return "Mismatched cert file on bind";
    websocket_path_t *p;
-   for (p = b->paths; p && (strcmp(p->origin ? : "", o.origin ? : "") || strcmp(p->path ? : "", o.path ? : "") || strcmp(p->host ? : "", o.host ? : "")); p = p->next);
+   for (p = b->paths;
+        p && (strcmp (p->origin ? : "", o.origin ? : "") || strcmp (p->path ? : "", o.path ? : "")
+              || strcmp (p->host ? : "", o.host ? : "")); p = p->next);
    if (p)
       return "Already bound";
-   p = malloc(sizeof(*p));
-   memset(p, 0, sizeof(*p));
+   p = malloc (sizeof (*p));
+   memset (p, 0, sizeof (*p));
    if (o.origin)
-      p->origin = strdup(o.origin);
+      p->origin = strdup (o.origin);
    if (o.host)
-      p->host = strdup(o.host);
+      p->host = strdup (o.host);
    if (o.path)
-      p->path = strdup(o.path);
+      p->path = strdup (o.path);
 #ifdef	USEAXL
    p->callbackxml = o.xml;
    p->callbackxmlraw = o.xmlraw;
@@ -1525,53 +1554,55 @@ const char *websocket_bind_opts(websocket_bindopts_t o)
    p->callbackjson = o.json;
    p->callbackjsonraw = o.jsonraw;
 #endif
-   pthread_mutex_lock(&b->mutex);
+   pthread_mutex_lock (&b->mutex);
    p->next = b->paths;
    b->paths = p;
-   pthread_mutex_unlock(&b->mutex);
+   pthread_mutex_unlock (&b->mutex);
    return NULL;                 // OK
 }
 
-const char *websocket_send_opts(websocket_send_t o)
+const char *
+websocket_send_opts (websocket_send_t o)
 {
    txb_t *txb = NULL;
    if (o.data)
-      txb = txb_new_data(o.len, o.data);        // raw
+      txb = txb_new_data (o.len, o.data);       // raw
 #ifdef	USEAJL
    else if (o.json)
-      txb = txb_new_json(o.json);
+      txb = txb_new_json (o.json);
 #endif
 #ifdef	USEAXL
    else if (o.xml)
-      txb = txb_new_xml(o.xml);
+      txb = txb_new_xml (o.xml);
 #endif
    if (!txb)
-      txb = txb_new_data(0, NULL);      // A close
+      txb = txb_new_data (0, NULL);     // A close
    if (!o.ws && !o.num)
    {                            // All
       websocket_bind_t *b;
       for (b = binds; b; b = b->next)
       {
-         pthread_mutex_lock(&b->mutex);
+         pthread_mutex_lock (&b->mutex);
          websocket_t *w;
          for (w = (websocket_t *) b->sessions; w; w = (websocket_t *) w->next)
-            txb_queue(w, txb);
-         pthread_mutex_unlock(&b->mutex);
+            txb_queue (w, txb);
+         pthread_mutex_unlock (&b->mutex);
       }
-      txb_done(txb);            // Allows for initial set count to 1
+      txb_done (txb);           // Allows for initial set count to 1
       return NULL;
    }
    // To specific sockets
    int p;
    for (p = 0; p < o.num; p++)
       if (o.ws[p])
-         txb_queue(o.ws[p], txb);
-   txb_done(txb);               // Allows for initial set count to 1
+         txb_queue (o.ws[p], txb);
+   txb_done (txb);              // Allows for initial set count to 1
    return NULL;
 }
 
 #ifdef	MAIN
-int main(int argc, const char *argv[])
+int
+main (int argc, const char *argv[])
 {
    const char *origin = NULL;
    const char *host = NULL;
@@ -1579,76 +1610,78 @@ int main(int argc, const char *argv[])
    const char *path = NULL;
    const char *certfile = NULL;
    const char *keyfile = NULL;
+   poptContext optCon;          // context for parsing command-line options
    {                            // POPT
-      poptContext optCon;       // context for parsing command-line options
       const struct poptOption optionsTable[] = {
-         { "debug", 'v', POPT_ARG_NONE, &websocket_debug, 0, "Debug", NULL },
-         { "cert-file", 'c', POPT_ARG_STRING, &certfile, 0, "Cert file", "filename" },
-         { "key-file", 'k', POPT_ARG_STRING, &keyfile, 0, "Private key file", "filename" },
-         { "origin", 'o', POPT_ARG_STRING, &origin, 0, "Origin", "hostname" },
-         { "host", 'H', POPT_ARG_STRING, &host, 0, "Host", "hostname" },
-         { "port", 'P', POPT_ARG_STRING, &port, 0, "Port", "name/number" },
-         { "path", 'p', POPT_ARG_STRING, &path, 0, "Path", "URL path" },
-         POPT_AUTOHELP { }
+         {"debug", 'v', POPT_ARG_NONE, &websocket_debug, 0, "Debug", NULL},
+         {"cert-file", 'c', POPT_ARG_STRING, &certfile, 0, "Cert file", "filename"},
+         {"key-file", 'k', POPT_ARG_STRING, &keyfile, 0, "Private key file", "filename"},
+         {"origin", 'o', POPT_ARG_STRING, &origin, 0, "Origin", "hostname"},
+         {"host", 'H', POPT_ARG_STRING, &host, 0, "Host", "hostname"},
+         {"port", 'P', POPT_ARG_STRING, &port, 0, "Port", "name/number"},
+         {"path", 'p', POPT_ARG_STRING, &path, 0, "Path", "URL path"},
+         POPT_AUTOHELP {}
       };
 
-      optCon = poptGetContext(NULL, argc, argv, optionsTable, 0);
+      optCon = poptGetContext (NULL, argc, argv, optionsTable, 0);
       //poptSetOtherOptionHelp (optCon, "");
 
       int c;
-      if ((c = poptGetNextOpt(optCon)) < -1)
-         errx(1, "%s: %s\n", poptBadOption(optCon, POPT_BADOPTION_NOALIAS), poptStrerror(c));
+      if ((c = poptGetNextOpt (optCon)) < -1)
+         errx (1, "%s: %s\n", poptBadOption (optCon, POPT_BADOPTION_NOALIAS), poptStrerror (c));
 
-      if (poptPeekArg(optCon))
+      if (poptPeekArg (optCon))
       {
-         poptPrintUsage(optCon, stderr, 0);
+         poptPrintUsage (optCon, stderr, 0);
          return -1;
       }
-      poptFreeContext(optCon);
    }
    const char *e = NULL;
 #ifdef	USEAXL
-   char *calledxml(websocket_t * w, xml_t head, xml_t data) {
-      fprintf(stderr, "w=%p\n", w);
+   char *calledxml (websocket_t * w, xml_t head, xml_t data)
+   {
+      fprintf (stderr, "w=%p\n", w);
       if (head)
       {
-         xml_write(stderr, head);
-         xml_tree_delete(head);
+         xml_write (stderr, head);
+         xml_tree_delete (head);
       }
       if (data)
       {
-         xml_write(stderr, data);
-         xml_tree_delete(data);
+         xml_write (stderr, data);
+         xml_tree_delete (data);
       }
       if (!w)
-         return strdup("*Stupid test");
+         return strdup ("*Stupid test");
       return NULL;
    }
- e = websocket_bind(port, origin, host, path, certfile, keyfile, xml:calledxml);
+ e = websocket_bind (port, origin, host, path, certfile, keyfile, xml:calledxml);
 #endif
 #ifdef	USEAJL
-   char *calledjson(websocket_t * w, j_t head, j_t data) {
-      fprintf(stderr, "w=%p\n", w);
+   char *calledjson (websocket_t * w, j_t head, j_t data)
+   {
+      fprintf (stderr, "w=%p\n", w);
       if (head)
       {
-         j_err(j_write_pretty(head, stderr));
-         j_delete(&head);
+         j_err (j_write_pretty (head, stderr));
+         j_delete (&head);
       }
       if (data)
       {
-         j_err(j_write_pretty(data, stderr));
-         j_delete(&data);
+         j_err (j_write_pretty (data, stderr));
+         j_delete (&data);
       }
       if (!w)
-         return strdup("*Stupid test");
+         return strdup ("*Stupid test");
       return NULL;
    }
- e = websocket_bind(port, origin, host, path, certfile, keyfile, json:calledjson);
+ e = websocket_bind (port, origin, host, path, certfile, keyfile, json:calledjson);
 #endif
    if (e)
-      errx(1, "Failed bind: %s", e);
+      errx (1, "Failed bind: %s", e);
 
    while (1);                   // Wait for shit to happen
+   poptFreeContext (optCon);
    return 0;
 }
 #endif
